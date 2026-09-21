@@ -13,6 +13,26 @@ subprojects {
     project.evaluationDependsOn(':app')
 }
 
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            if (project.android.namespace == null) {
+                def manifestFile = file("${project.projectDir}/src/main/AndroidManifest.xml")
+                if (manifestFile.exists()) {
+                    def manifestContent = manifestFile.getText('UTF-8')
+                    def matcher = manifestContent =~ /package="([^"]+)"/
+                    if (matcher.find()) {
+                        project.android.namespace = matcher.group(1)
+                    }
+                }
+                if (!project.android.namespace) {
+                    project.android.namespace = "com.injected.${project.name.replaceAll('[^a-zA-Z0-9_]', '_')}"
+                }
+            }
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
