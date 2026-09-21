@@ -12,8 +12,6 @@ dependencies:
   # Board UI & Chess Logic
   chess: ^0.8.1
   chessground: ^9.0.0
-  # Stockfish C++ Engine via FFI
-  stockfish: ^1.8.1
   # Hardware & Camera
   camera: ^0.11.0
   battery_plus: ^6.0.0

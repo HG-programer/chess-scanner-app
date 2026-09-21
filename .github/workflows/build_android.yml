@@ -71,13 +71,16 @@ jobs:
 
       - name: 🔨 Build Android APK (For Personal Testing / Sideloading)
         working-directory: mobile_app
-        run: flutter build apk --release --no-tree-shake-icons --verbose
+        run: |
+          flutter build apk --release --no-tree-shake-icons --verbose > build.log 2>&1 || (tail -n 120 build.log && exit 1)
 
       - name: 🚀 Build Android App Bundle (For Google Play Store Console)
         working-directory: mobile_app
-        run: flutter build appbundle --release --no-tree-shake-icons --verbose
+        run: |
+          flutter build appbundle --release --no-tree-shake-icons --verbose > bundle.log 2>&1 || (tail -n 120 bundle.log && exit 1)
 
       - name: 📤 Upload APK Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: chess-scanner-release-apk
@@ -85,8 +88,19 @@ jobs:
           retention-days: 30
 
       - name: 📤 Upload Google Play Bundle (AAB) Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: chess-scanner-google-play-aab
           path: mobile_app/build/app/outputs/bundle/release/app-release.aab
           retention-days: 30
+
+      - name: 📄 Upload Build Diagnostics on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-failure-diagnostic
+          path: |
+            mobile_app/build.log
+            mobile_app/bundle.log
+          retention-days: 7
