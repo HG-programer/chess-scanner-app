@@ -34,6 +34,12 @@ class InteractiveChessboard extends StatefulWidget {
   State<InteractiveChessboard> createState() => _InteractiveChessboardState();
 }
 
+class _BoardCoord {
+  final int row;
+  final int col;
+  const _BoardCoord(this.row, this.col);
+}
+
 class _InteractiveChessboardState extends State<InteractiveChessboard> {
   String? _selectedSquare;
   List<String> _legalDestinations = [];
@@ -101,13 +107,13 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
   }
 
   /// Converts algebraic square e.g. "e4" to (row, col)
-  Point<int> _squareToCoords(String sq) {
-    if (sq.length < 2) return const Point(0, 0);
+  _BoardCoord _squareToCoords(String sq) {
+    if (sq.length < 2) return const _BoardCoord(0, 0);
     final file = sq[0].toLowerCase().codeUnitAt(0) - 'a'.codeUnitAt(0);
     final rank = int.tryParse(sq[1]) ?? 1;
     final row = widget.isWhiteOrientation ? 8 - rank : rank - 1;
     final col = widget.isWhiteOrientation ? file : 7 - file;
-    return Point(row, col);
+    return _BoardCoord(row, col);
   }
 
   /// Finds all legal destination squares for a piece on [fromSquare]
@@ -156,10 +162,10 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     final grid = _parseFenGrid(widget.fen);
     final pFrom = _squareToCoords(from);
     final pTo = _squareToCoords(to);
-    final piece = grid[pFrom.x][pFrom.y];
+    final piece = grid[pFrom.row][pFrom.col];
     if (piece != null) {
-      grid[pFrom.x][pFrom.y] = null;
-      grid[pTo.x][pTo.y] = piece;
+      grid[pFrom.row][pFrom.col] = null;
+      grid[pTo.row][pTo.col] = piece;
       // Rebuild FEN rows
       final rowStrs = <String>[];
       for (int r = 0; r < 8; r++) {
@@ -331,11 +337,8 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                             final isSelected = sq == _selectedSquare;
                             final isLegal = _legalDestinations.contains(sq);
 
-                            // Get piece from parsed grid
-                            final pCoords = _squareToCoords(sq);
-                            final pieceChar = (pCoords.x >= 0 && pCoords.x < 8 && pCoords.y >= 0 && pCoords.y < 8)
-                                ? grid[pCoords.x][pCoords.y]
-                                : null;
+                            // Get piece from parsed grid directly
+                            final pieceChar = grid[r][c];
 
                             final isWhitePiece = pieceChar != null && pieceChar == pieceChar.toUpperCase();
                             final bgColor = isLight ? const Color(0xFFF0D9B5) : const Color(0xFFB58863);
