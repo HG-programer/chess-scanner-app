@@ -44,6 +44,8 @@ class _BoardCoord {
 class _InteractiveChessboardState extends State<InteractiveChessboard> {
   String? _selectedSquare;
   List<String> _legalDestinations = [];
+  String? _lastFrom;
+  String? _lastTo;
   late chess_logic.Chess _chess;
 
   @override
@@ -132,6 +134,11 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
   /// Execute move from [from] to [to]
   void _executeMove(String from, String to) {
     if (widget.isAiThinking) return;
+
+    setState(() {
+      _lastFrom = from;
+      _lastTo = to;
+    });
 
     try {
       final success = _chess.move({'from': from, 'to': to, 'promotion': 'q'});
@@ -345,92 +352,105 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                   _executeMove(fromSq, sq);
                                 },
                                 builder: (ctx, candidateData, rejectedData) {
-                                  return GestureDetector(
-                                    onTap: () => _onSquareTap(sq, pieceChar),
-                                    child: Container(
-                                      color: isSelected
-                                          ? const Color(0xFFBBCB44)
-                                          : (candidateData.isNotEmpty
-                                              ? const Color(0xFF769656)
-                                              : bgColor),
-                                      child: Stack(
-                                        alignment: Alignment.center,
-                                        children: [
-                                          // Coordinate Rank/File indicators on edges
-                                          if (c == 0)
-                                            Positioned(
-                                              top: 2,
-                                              left: 2,
-                                              child: Text(
-                                                sq[1],
-                                                style: TextStyle(
-                                                  fontSize: 9,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
-                                                ),
-                                              ),
-                                            ),
-                                          if (r == 7)
-                                            Positioned(
-                                              bottom: 2,
-                                              right: 2,
-                                              child: Text(
-                                                sq[0],
-                                                style: TextStyle(
-                                                  fontSize: 9,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
-                                                ),
-                                              ),
-                                            ),
+                                    final isTrail = sq == _lastFrom || sq == _lastTo;
+                                    final tileColor = isSelected
+                                        ? const Color(0xFFBBCB44)
+                                        : (candidateData.isNotEmpty
+                                            ? const Color(0xFF769656)
+                                            : (isTrail ? const Color(0xFFCED56A) : bgColor));
 
-                                          // Legal Destination Dot
-                                          if (isLegal)
-                                            Container(
-                                              width: pieceChar == null ? 14 : 32,
-                                              height: pieceChar == null ? 14 : 32,
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: pieceChar == null
-                                                    ? Colors.black.withOpacity(0.28)
-                                                    : Colors.transparent,
-                                                border: pieceChar != null
-                                                    ? Border.all(color: Colors.black.withOpacity(0.35), width: 4)
-                                                    : null,
+                                    return GestureDetector(
+                                      onTap: () => _onSquareTap(sq, pieceChar),
+                                      child: Container(
+                                        color: tileColor,
+                                        child: Stack(
+                                          alignment: Alignment.center,
+                                          children: [
+                                            // Coordinate Rank/File indicators on edges
+                                            if (c == 0)
+                                              Positioned(
+                                                top: 2,
+                                                left: 2,
+                                                child: Text(
+                                                  sq[1],
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
+                                                  ),
+                                                ),
                                               ),
-                                            ),
+                                            if (r == 7)
+                                              Positioned(
+                                                bottom: 2,
+                                                right: 2,
+                                                child: Text(
+                                                  sq[0],
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
+                                                  ),
+                                                ),
+                                              ),
 
-                                          // Piece Widget (Draggable)
-                                          if (pieceChar != null)
-                                            Draggable<String>(
-                                              data: sq,
-                                              onDragStarted: () {
-                                                setState(() {
-                                                  _selectedSquare = sq;
-                                                  _legalDestinations = _getLegalMovesForSquare(sq);
-                                                });
-                                              },
-                                              feedback: Material(
-                                                color: Colors.transparent,
-                                                child: ChessPieceWidget(
-                                                  pieceChar: pieceChar,
-                                                  size: 50,
-                                                  isDragging: true,
+                                            // Legal Destination Dot
+                                            if (isLegal)
+                                              Container(
+                                                width: pieceChar == null ? 14 : 32,
+                                                height: pieceChar == null ? 14 : 32,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: pieceChar == null
+                                                      ? Colors.black.withOpacity(0.28)
+                                                      : Colors.transparent,
+                                                  border: pieceChar != null
+                                                      ? Border.all(color: Colors.black.withOpacity(0.35), width: 4)
+                                                      : null,
                                                 ),
                                               ),
-                                              childWhenDragging: Opacity(
-                                                opacity: 0.25,
-                                                child: ChessPieceWidget(
-                                                  pieceChar: pieceChar,
-                                                  size: 38,
+
+                                            // Piece Widget (Draggable) with touch scale animation
+                                            if (pieceChar != null)
+                                              Draggable<String>(
+                                                data: sq,
+                                                dragAnchorStrategy: pointerDragAnchorStrategy,
+                                                onDragStarted: () {
+                                                  setState(() {
+                                                    _selectedSquare = sq;
+                                                    _legalDestinations = _getLegalMovesForSquare(sq);
+                                                  });
+                                                },
+                                                feedback: Material(
+                                                  color: Colors.transparent,
+                                                  child: Transform.translate(
+                                                    offset: const Offset(-26, -26),
+                                                    child: ChessPieceWidget(
+                                                      pieceChar: pieceChar,
+                                                      size: 52,
+                                                      isDragging: true,
+                                                    ),
+                                                  ),
+                                                ),
+                                                childWhenDragging: Opacity(
+                                                  opacity: 0.20,
+                                                  child: ChessPieceWidget(
+                                                    pieceChar: pieceChar,
+                                                    size: 38,
+                                                  ),
+                                                ),
+                                                child: AnimatedScale(
+                                                  scale: isSelected ? 1.14 : 1.0,
+                                                  duration: const Duration(milliseconds: 140),
+                                                  curve: Curves.easeOutBack,
+                                                  child: ChessPieceWidget(
+                                                    pieceChar: pieceChar,
+                                                    size: 38,
+                                                  ),
                                                 ),
                                               ),
-                                              child: ChessPieceWidget(
-                                                pieceChar: pieceChar,
-                                                size: 38,
-                                              ),
-                                            ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   );
