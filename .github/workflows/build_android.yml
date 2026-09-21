@@ -29,9 +29,20 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 🛠️ Ensure Android Platform
+      - name: 🛠️ Generate Official Android Platform
         working-directory: mobile_app
-        run: flutter create --org com.chessscanner --platforms android .
+        run: |
+          rm -rf android
+          flutter create --org com.chessscanner --project-name chess_scanner --platforms android .
+          python3 -c "
+          manifest = 'android/app/src/main/AndroidManifest.xml'
+          with open(manifest, 'r') as f:
+              c = f.read()
+          c = c.replace('<application', '    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <application')
+          c = c.replace('<activity', '        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"ca-app-pub-3940256099942544~3347511713\"/>\n        <activity')
+          with open(manifest, 'w') as f:
+              f.write(c)
+          "
 
       - name: 📦 Install Flutter Dependencies
         working-directory: mobile_app
@@ -39,11 +50,11 @@ jobs:
 
       - name: 🔨 Build Android APK (For Personal Testing / Sideloading)
         working-directory: mobile_app
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons --verbose
 
       - name: 🚀 Build Android App Bundle (For Google Play Store Console)
         working-directory: mobile_app
-        run: flutter build appbundle --release --no-tree-shake-icons
+        run: flutter build appbundle --release --no-tree-shake-icons --verbose
 
       - name: 📤 Upload APK Artifact
         uses: actions/upload-artifact@v4
