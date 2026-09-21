@@ -2,20 +2,32 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:chess/chess.dart' as chess_logic;
 
-/// Interactive 8x8 Chessboard Widget with piece dragging, tap-to-move,
-/// legal move highlights, and AI best-move arrow rendering.
+/// Interactive 8x8 Chessboard supporting Drag & Drop, Tap to Move,
+/// legal move dots, check indicator, takeback, board flip, and AI best-move arrow.
 class InteractiveChessboard extends StatefulWidget {
   final String fen;
-  final String? bestMove; // UCI format e.g. "e2e4"
+  final String? bestMove; // UCI e.g. "e2e4"
   final bool isWhiteOrientation;
+  final bool isPlayVsAi;
+  final bool isAiThinking;
   final Function(String from, String to, String newFen) onMoveMade;
+  final VoidCallback? onResetBoard;
+  final VoidCallback? onUndoMove;
+  final VoidCallback? onFlipBoard;
+  final Function(bool playVsAi)? onToggleMode;
 
   const InteractiveChessboard({
     Key? key,
     required this.fen,
     this.bestMove,
     this.isWhiteOrientation = true,
+    this.isPlayVsAi = true,
+    this.isAiThinking = false,
     required this.onMoveMade,
+    this.onResetBoard,
+    this.onUndoMove,
+    this.onFlipBoard,
+    this.onToggleMode,
   }) : super(key: key);
 
   @override
@@ -24,9 +36,10 @@ class InteractiveChessboard extends StatefulWidget {
 
 class _InteractiveChessboardState extends State<InteractiveChessboard> {
   String? _selectedSquare;
-  List<String> _legalMoves = [];
+  List<String> _legalDestinations = [];
   late chess_logic.Chess _chess;
 
+  // Unicode Chess Glyphs
   final Map<String, String> _glyphs = {
     'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
     'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
@@ -44,7 +57,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     if (oldWidget.fen != widget.fen) {
       _loadChess();
       _selectedSquare = null;
-      _legalMoves = [];
+      _legalDestinations = [];
     }
   }
 
@@ -56,155 +69,443 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     }
   }
 
+  /// Parses the 8x8 piece grid directly from FEN string for 100% reliability
+  List<List<String?>> _parseFenGrid(String fen) {
+    final grid = List.generate(8, (_) => List<String?>.filled(8, null));
+    final parts = fen.split(' ');
+    final rows = parts[0].split('/');
+
+    for (int r = 0; r < 8 && r < rows.length; r++) {
+      int c = 0;
+      for (int i = 0; i < rows[r].length; i++) {
+        final ch = rows[r][i];
+        final digit = int.tryParse(ch);
+        if (digit != null) {
+          c += digit;
+        } else {
+          if (c < 8) {
+            grid[r][c] = ch;
+            c++;
+          }
+        }
+      }
+    }
+    return grid;
+  }
+
+  /// Converts board (row, col) into algebraic square e.g. "e4"
   String _coordsToSquare(int row, int col) {
-    // row 0 = rank 8 (if white orientation)
     final file = String.fromCharCode('a'.codeUnitAt(0) + (widget.isWhiteOrientation ? col : 7 - col));
     final rank = widget.isWhiteOrientation ? (8 - row).toString() : (row + 1).toString();
     return '$file$rank';
   }
 
-  String? _getPieceAtSquare(String sq) {
-    final piece = _chess.get(sq);
-    if (piece == null) return null;
-    return piece.color == chess_logic.Color.WHITE
-        ? piece.type.name.toUpperCase()
-        : piece.type.name.toLowerCase();
+  /// Converts algebraic square e.g. "e4" to (row, col)
+  Point<int> _squareToCoords(String sq) {
+    if (sq.length < 2) return const Point(0, 0);
+    final file = sq[0].toLowerCase().codeUnitAt(0) - 'a'.codeUnitAt(0);
+    final rank = int.tryParse(sq[1]) ?? 1;
+    final row = widget.isWhiteOrientation ? 8 - rank : rank - 1;
+    final col = widget.isWhiteOrientation ? file : 7 - file;
+    return Point(row, col);
   }
 
-  void _onSquareTapped(String sq) {
-    if (_selectedSquare == null) {
-      final piece = _chess.get(sq);
-      if (piece != null && piece.color == _chess.turn) {
-        setState(() {
-          _selectedSquare = sq;
-          final moves = _chess.moves({'square': sq, 'verbose': true});
-          _legalMoves = moves.map((m) => m['to'] as String).toList();
-        });
+  /// Finds all legal destination squares for a piece on [fromSquare]
+  List<String> _getLegalMovesForSquare(String fromSquare) {
+    try {
+      final verboseMoves = _chess.moves({'verbose': true});
+      final destinations = <String>[];
+      for (final m in verboseMoves) {
+        if (m is Map) {
+          if (m['from'] == fromSquare) {
+            destinations.add(m['to'].toString());
+          }
+        }
       }
+      return destinations;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Execute move from [from] to [to]
+  void _executeMove(String from, String to) {
+    if (widget.isAiThinking) return;
+
+    try {
+      final success = _chess.move({'from': from, 'to': to, 'promotion': 'q'});
+      if (success) {
+        final newFen = _chess.fen;
+        setState(() {
+          _selectedSquare = null;
+          _legalDestinations = [];
+        });
+        widget.onMoveMade(from, to, newFen);
+        return;
+      }
+    } catch (_) {}
+
+    // Fallback: If strict chess.dart move check failed in analysis mode, allow move directly
+    if (!widget.isPlayVsAi) {
+      _forceMoveInFen(from, to);
+    }
+  }
+
+  void _forceMoveInFen(String from, String to) {
+    // In free analysis mode, fallback move
+    final grid = _parseFenGrid(widget.fen);
+    final pFrom = _squareToCoords(from);
+    final pTo = _squareToCoords(to);
+    final piece = grid[pFrom.x][pFrom.y];
+    if (piece != null) {
+      grid[pFrom.x][pFrom.y] = null;
+      grid[pTo.x][pTo.y] = piece;
+      // Rebuild FEN rows
+      final rowStrs = <String>[];
+      for (int r = 0; r < 8; r++) {
+        int empty = 0;
+        String rowStr = '';
+        for (int c = 0; c < 8; c++) {
+          if (grid[r][c] == null) {
+            empty++;
+          } else {
+            if (empty > 0) {
+              rowStr += empty.toString();
+              empty = 0;
+            }
+            rowStr += grid[r][c]!;
+          }
+        }
+        if (empty > 0) rowStr += empty.toString();
+        rowStrs.add(rowStr);
+      }
+      final turn = widget.fen.contains(' w ') ? 'b' : 'w';
+      final newFen = '${rowStrs.join('/')} $turn - - 0 1';
+      widget.onMoveMade(from, to, newFen);
+    }
+  }
+
+  void _onSquareTap(String sq, String? pieceChar) {
+    if (widget.isAiThinking) return;
+
+    if (_selectedSquare == null) {
+      if (pieceChar == null) return;
+      // In vs AI mode, only allow moving White if user is White
+      final isWhitePiece = pieceChar == pieceChar.toUpperCase();
+      final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
+      if (widget.isPlayVsAi && (isWhitePiece != isWhiteTurn)) {
+        return;
+      }
+
+      setState(() {
+        _selectedSquare = sq;
+        _legalDestinations = _getLegalMovesForSquare(sq);
+      });
     } else {
-      if (_legalMoves.contains(sq)) {
-        final from = _selectedSquare!;
-        final success = _chess.move({'from': from, 'to': sq, 'promotion': 'q'});
-        if (success) {
-          widget.onMoveMade(from, sq, _chess.fen);
+      if (_legalDestinations.contains(sq) || (!widget.isPlayVsAi && _selectedSquare != sq)) {
+        _executeMove(_selectedSquare!, sq);
+      } else {
+        // Deselect or select another piece of current turn
+        if (pieceChar != null) {
+          setState(() {
+            _selectedSquare = sq;
+            _legalDestinations = _getLegalMovesForSquare(sq);
+          });
+        } else {
           setState(() {
             _selectedSquare = null;
-            _legalMoves = [];
+            _legalDestinations = [];
           });
-          return;
         }
       }
-      // Select another piece or deselect
-      final piece = _chess.get(sq);
-      setState(() {
-        if (piece != null && piece.color == _chess.turn) {
-          _selectedSquare = sq;
-          final moves = _chess.moves({'square': sq, 'verbose': true});
-          _legalMoves = moves.map((m) => m['to'] as String).toList();
-        } else {
-          _selectedSquare = null;
-          _legalMoves = [];
-        }
-      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1.0,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Stack(
+    final grid = _parseFenGrid(widget.fen);
+    final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
+
+    return Column(
+      children: [
+        // 1. Status / Turn Bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E1E),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // 8x8 Grid
-              Column(
-                children: List.generate(8, (r) {
-                  return Expanded(
-                    child: Row(
-                      children: List.generate(8, (c) {
-                        final sq = _coordsToSquare(r, c);
-                        final isLight = (r + c) % 2 == 0;
-                        final isSelected = sq == _selectedSquare;
-                        final isLegal = _legalMoves.contains(sq);
-                        final pieceChar = _getPieceAtSquare(sq);
-
-                        final bgColor = isLight ? const Color(0xFFF0D9B5) : const Color(0xFFB58863);
-
-                        return Expanded(
-                          child: GestureDetector(
-                            onTap: () => _onSquareTapped(sq),
-                            child: Container(
-                              color: isSelected ? const Color(0xFFBBCB44) : bgColor,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  // Legal move dot
-                                  if (isLegal)
-                                    Container(
-                                      width: pieceChar == null ? 14 : null,
-                                      height: pieceChar == null ? 14 : null,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.black.withOpacity(pieceChar == null ? 0.25 : 0.0),
-                                        border: pieceChar != null
-                                            ? Border.all(color: Colors.black.withOpacity(0.35), width: 4)
-                                            : null,
-                                      ),
-                                    ),
-                                  // Piece Glyph
-                                  if (pieceChar != null)
-                                    Text(
-                                      _glyphs[pieceChar] ?? pieceChar,
-                                      style: TextStyle(
-                                        fontSize: 34,
-                                        height: 1.1,
-                                        color: pieceChar == pieceChar.toUpperCase()
-                                            ? Colors.white
-                                            : const Color(0xFF1E1E1E),
-                                        shadows: [
-                                          Shadow(
-                                            blurRadius: 3.0,
-                                            color: Colors.black.withOpacity(0.6),
-                                            offset: const Offset(1, 1),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
+              Row(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isWhiteTurn ? Colors.white : Colors.grey[800],
+                      border: Border.all(color: Colors.white70, width: 1.5),
                     ),
-                  );
-                }),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.isAiThinking
+                        ? '🤖 Engine is thinking...'
+                        : (isWhiteTurn ? 'White to Move' : 'Black to Move'),
+                    style: TextStyle(
+                      color: widget.isAiThinking ? Colors.amber : Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-
-              // Arrow Layer for Best Move (e.g. e2e4)
-              if (widget.bestMove != null && widget.bestMove!.length >= 4)
-                CustomPaint(
-                  size: Size.infinite,
-                  painter: ArrowPainter(
-                    bestMove: widget.bestMove!,
-                    isWhite: widget.isWhiteOrientation,
+              // Play vs AI Toggle
+              GestureDetector(
+                onTap: () {
+                  if (widget.onToggleMode != null) {
+                    widget.onToggleMode!(!widget.isPlayVsAi);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: widget.isPlayVsAi ? Colors.amber.withOpacity(0.2) : Colors.blueAccent.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent, width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        widget.isPlayVsAi ? Icons.smart_toy : Icons.people,
+                        size: 14,
+                        color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        widget.isPlayVsAi ? 'Vs Engine' : 'Analysis',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+              ),
             ],
           ),
         ),
+        const SizedBox(height: 8),
+
+        // 2. The 8x8 Board
+        AspectRatio(
+          aspectRatio: 1.0,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.6),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Stack(
+                children: [
+                  Column(
+                    children: List.generate(8, (r) {
+                      return Expanded(
+                        child: Row(
+                          children: List.generate(8, (c) {
+                            final sq = _coordsToSquare(r, c);
+                            final isLight = (r + c) % 2 == 0;
+                            final isSelected = sq == _selectedSquare;
+                            final isLegal = _legalDestinations.contains(sq);
+
+                            // Get piece from parsed grid
+                            final pCoords = _squareToCoords(sq);
+                            final pieceChar = (pCoords.x >= 0 && pCoords.x < 8 && pCoords.y >= 0 && pCoords.y < 8)
+                                ? grid[pCoords.x][pCoords.y]
+                                : null;
+
+                            final isWhitePiece = pieceChar != null && pieceChar == pieceChar.toUpperCase();
+                            final bgColor = isLight ? const Color(0xFFF0D9B5) : const Color(0xFFB58863);
+
+                            return Expanded(
+                              child: DragTarget<String>(
+                                onWillAccept: (fromSq) => fromSq != null && fromSq != sq,
+                                onAccept: (fromSq) {
+                                  _executeMove(fromSq, sq);
+                                },
+                                builder: (ctx, candidateData, rejectedData) {
+                                  return GestureDetector(
+                                    onTap: () => _onSquareTap(sq, pieceChar),
+                                    child: Container(
+                                      color: isSelected
+                                          ? const Color(0xFFBBCB44)
+                                          : (candidateData.isNotEmpty
+                                              ? const Color(0xFF769656)
+                                              : bgColor),
+                                      child: Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          // Coordinate Rank/File indicators on edges
+                                          if (c == 0)
+                                            Positioned(
+                                              top: 2,
+                                              left: 2,
+                                              child: Text(
+                                                sq[1],
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
+                                                ),
+                                              ),
+                                            ),
+                                          if (r == 7)
+                                            Positioned(
+                                              bottom: 2,
+                                              right: 2,
+                                              child: Text(
+                                                sq[0],
+                                                style: TextStyle(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
+                                                ),
+                                              ),
+                                            ),
+
+                                          // Legal Destination Dot
+                                          if (isLegal)
+                                            Container(
+                                              width: pieceChar == null ? 14 : 32,
+                                              height: pieceChar == null ? 14 : 32,
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: pieceChar == null
+                                                    ? Colors.black.withOpacity(0.28)
+                                                    : Colors.transparent,
+                                                border: pieceChar != null
+                                                    ? Border.all(color: Colors.black.withOpacity(0.35), width: 4)
+                                                    : null,
+                                              ),
+                                            ),
+
+                                          // Piece Widget (Draggable)
+                                          if (pieceChar != null)
+                                            Draggable<String>(
+                                              data: sq,
+                                              onDragStarted: () {
+                                                setState(() {
+                                                  _selectedSquare = sq;
+                                                  _legalDestinations = _getLegalMovesForSquare(sq);
+                                                });
+                                              },
+                                              feedback: Material(
+                                                color: Colors.transparent,
+                                                child: Text(
+                                                  _glyphs[pieceChar] ?? pieceChar,
+                                                  style: TextStyle(
+                                                    fontSize: 44,
+                                                    height: 1.0,
+                                                    color: isWhitePiece ? Colors.white : const Color(0xFF1E1E1E),
+                                                    shadows: [
+                                                      Shadow(
+                                                        blurRadius: 8.0,
+                                                        color: Colors.black.withOpacity(0.8),
+                                                        offset: const Offset(2, 4),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                              childWhenDragging: Opacity(
+                                                opacity: 0.3,
+                                                child: _buildPieceText(pieceChar, isWhitePiece),
+                                              ),
+                                              child: _buildPieceText(pieceChar, isWhitePiece),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          }),
+                        ),
+                      );
+                    }),
+                  ),
+
+                  // Best Move Arrow Layer (e.g. e2e4)
+                  if (widget.bestMove != null && widget.bestMove!.length >= 4)
+                    IgnorePointer(
+                      child: CustomPaint(
+                        size: Size.infinite,
+                        painter: ArrowPainter(
+                          bestMove: widget.bestMove!,
+                          isWhite: widget.isWhiteOrientation,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // 3. Quick Board Actions Bar (Flip, Undo, Reset)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            TextButton.icon(
+              onPressed: widget.onFlipBoard,
+              icon: const Icon(Icons.swap_vert, size: 18, color: Colors.white70),
+              label: const Text('Flip', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ),
+            TextButton.icon(
+              onPressed: widget.onUndoMove,
+              icon: const Icon(Icons.undo, size: 18, color: Colors.white70),
+              label: const Text('Takeback', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            ),
+            TextButton.icon(
+              onPressed: widget.onResetBoard,
+              icon: const Icon(Icons.refresh, size: 18, color: Colors.amber),
+              label: const Text('New Game', style: TextStyle(color: Colors.amber, fontSize: 12)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPieceText(String pieceChar, bool isWhitePiece) {
+    return Text(
+      _glyphs[pieceChar] ?? pieceChar,
+      style: TextStyle(
+        fontSize: 34,
+        height: 1.1,
+        color: isWhitePiece ? Colors.white : const Color(0xFF1E1E1E),
+        shadows: [
+          Shadow(
+            blurRadius: 3.0,
+            color: Colors.black.withOpacity(0.6),
+            offset: const Offset(1, 1),
+          ),
+        ],
       ),
     );
   }
@@ -236,8 +537,8 @@ class ArrowPainter extends CustomPainter {
     final end = _squareToCenter(toSq, sqSize);
 
     final paint = Paint()
-      ..color = const Color(0xA622C55E) // Semi-transparent bright emerald green
-      ..strokeWidth = 7.0
+      ..color = const Color(0xC822C55E) // Semi-transparent bright emerald green
+      ..strokeWidth = 6.0
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
@@ -246,7 +547,7 @@ class ArrowPainter extends CustomPainter {
 
     // Draw arrowhead
     final angle = (end - start).direction;
-    final arrowSize = 18.0;
+    const arrowSize = 16.0;
     final path = Path();
     path.moveTo(end.dx, end.dy);
     path.lineTo(
@@ -259,13 +560,15 @@ class ArrowPainter extends CustomPainter {
     );
     path.close();
 
-    final arrowHeadPaint = Paint()
-      ..color = const Color(0xA622C55E)
+    final fillPaint = Paint()
+      ..color = const Color(0xC822C55E)
       ..style = PaintingStyle.fill;
-    canvas.drawPath(path, arrowHeadPaint);
+
+    canvas.drawPath(path, fillPaint);
   }
 
   @override
-  bool shouldRepaint(covariant ArrowPainter oldDelegate) =>
-      oldDelegate.bestMove != bestMove || oldDelegate.isWhite != isWhite;
+  bool shouldRepaint(covariant ArrowPainter oldDelegate) {
+    return oldDelegate.bestMove != bestMove || oldDelegate.isWhite != isWhite;
+  }
 }

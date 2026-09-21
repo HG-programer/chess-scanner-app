@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:chess/chess.dart' as chess_logic;
 import '../services/retention_service.dart';
 import 'interactive_chessboard.dart';
 
@@ -52,11 +54,28 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
           _statusColor = Colors.greenAccent;
         });
       } else {
-        // Play opponent reply if exists
+        // Play opponent reply automatically after 450ms
         setState(() {
           _currentFen = newFen;
-          _statusMessage = "Correct! Playing response...";
+          _statusMessage = "Correct! Playing opponent response...";
           _statusColor = Colors.greenAccent;
+        });
+
+        Timer(const Duration(milliseconds: 450), () {
+          if (!mounted || _puzzle == null || _moveIndex >= _puzzle!.solution.length) return;
+          final replyUci = _puzzle!.solution[_moveIndex];
+          _moveIndex++;
+          _playUciOnBoard(replyUci);
+
+          setState(() {
+            if (_moveIndex >= _puzzle!.solution.length) {
+              _statusMessage = "🎉 Puzzle Solved! Brilliant tactic found.";
+              _statusColor = Colors.greenAccent;
+            } else {
+              _statusMessage = "Your turn: Find the next move!";
+              _statusColor = Colors.amber;
+            }
+          });
         });
       }
     } else {
@@ -65,6 +84,19 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
         _statusColor = Colors.redAccent;
       });
     }
+  }
+
+  void _playUciOnBoard(String uci) {
+    if (uci.length < 4) return;
+    final from = uci.substring(0, 2);
+    final to = uci.substring(2, 4);
+    try {
+      final chess = chess_logic.Chess.fromFEN(_currentFen);
+      chess.move({'from': from, 'to': to, 'promotion': 'q'});
+      setState(() {
+        _currentFen = chess.fen;
+      });
+    } catch (_) {}
   }
 
   void _resetPuzzle() {
@@ -90,6 +122,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text('Failed to load today\'s puzzle.'),
+            const SizedBox(height: 8),
             ElevatedButton(onPressed: _loadPuzzle, child: const Text('Retry')),
           ],
         ),
@@ -155,7 +188,9 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
           InteractiveChessboard(
             fen: _currentFen,
             bestMove: null,
+            isPlayVsAi: false,
             onMoveMade: _onMove,
+            onResetBoard: _resetPuzzle,
           ),
           const SizedBox(height: 16),
 
