@@ -452,16 +452,15 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                           ],
                                         ),
                                       ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            );
-                          }),
-                        ),
-                      );
-                    }),
-                  ),
+                                    );
+                                  },
+                                ),
+                              );
+                            }),
+                          ),
+                        );
+                      }),
+                    ),
 
                   // Best Move Arrow Layer (e.g. e2e4)
                   if (widget.bestMove != null && widget.bestMove!.length >= 4)
