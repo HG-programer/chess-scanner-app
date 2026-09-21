@@ -10,10 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
   # Board UI & Chess Logic
-  chessground: ^1.4.0
   chess: ^0.8.1
+  chessground: ^10.2.0
   # Stockfish C++ Engine via FFI
-  stockfish: ^1.4.1
+  stockfish: ^1.8.1
   # Hardware & Camera
   camera: ^0.11.0
   battery_plus: ^6.0.0
@@ -33,5 +33,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/pieces/
