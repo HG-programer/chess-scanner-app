@@ -1,0 +1,37 @@
+name: chess_scanner
+description: "AI Camera Chess Board Scanner & Stockfish Analysis Mobile App"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Board UI & Chess Logic
+  chessground: ^1.4.0
+  chess: ^0.8.1
+  # Stockfish C++ Engine via FFI
+  stockfish: ^1.4.1
+  # Hardware & Camera
+  camera: ^0.11.0
+  battery_plus: ^6.0.0
+  device_info_plus: ^10.0.0
+  # Monetization (Ads + IAP)
+  google_mobile_ads: ^5.1.0
+  purchases_flutter: ^8.0.0
+  # Retention & Reviews
+  in_app_review: ^2.0.9
+  shared_preferences: ^2.2.3
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/pieces/

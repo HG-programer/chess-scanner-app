@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.cache/
+reports/
+
+# Large Binaries (Stockfish binary for desktop testing)
+bin/
+*.exe
+
+# Flutter / Dart
+**/build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.log
+
+# Android
+**/android/.gradle/
+**/android/local.properties
+**/android/app/build/
+**/android/captures/
+**/android/*.iml
+.idea/
+.vscode/

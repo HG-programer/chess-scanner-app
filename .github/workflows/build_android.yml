@@ -1,0 +1,57 @@
+name: Build Android APK & AAB
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # Allows manual trigger from GitHub UI anytime
+
+jobs:
+  build:
+    name: Compile Android Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: 🐦 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Install Flutter Dependencies
+        working-directory: mobile_app
+        run: flutter pub get
+
+      - name: 🔨 Build Android APK (For Personal Testing / Sideloading)
+        working-directory: mobile_app
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: 🚀 Build Android App Bundle (For Google Play Store Console)
+        working-directory: mobile_app
+        run: flutter build appbundle --release --no-tree-shake-icons
+
+      - name: 📤 Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chess-scanner-release-apk
+          path: mobile_app/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+      - name: 📤 Upload Google Play Bundle (AAB) Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chess-scanner-google-play-aab
+          path: mobile_app/build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
