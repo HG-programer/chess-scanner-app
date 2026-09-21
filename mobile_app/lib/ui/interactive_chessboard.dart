@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:chess/chess.dart' as chess_logic;
+import 'chess_piece_widget.dart';
 
 /// Interactive 8x8 Chessboard supporting Drag & Drop, Tap to Move,
 /// legal move dots, check indicator, takeback, board flip, and AI best-move arrow.
@@ -44,12 +45,6 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
   String? _selectedSquare;
   List<String> _legalDestinations = [];
   late chess_logic.Chess _chess;
-
-  // Unicode Chess Glyphs
-  final Map<String, String> _glyphs = {
-    'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
-    'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
-  };
 
   @override
   void initState() {
@@ -417,27 +412,23 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                               },
                                               feedback: Material(
                                                 color: Colors.transparent,
-                                                child: Text(
-                                                  _glyphs[pieceChar] ?? pieceChar,
-                                                  style: TextStyle(
-                                                    fontSize: 44,
-                                                    height: 1.0,
-                                                    color: isWhitePiece ? Colors.white : const Color(0xFF1E1E1E),
-                                                    shadows: [
-                                                      Shadow(
-                                                        blurRadius: 8.0,
-                                                        color: Colors.black.withOpacity(0.8),
-                                                        offset: const Offset(2, 4),
-                                                      ),
-                                                    ],
-                                                  ),
+                                                child: ChessPieceWidget(
+                                                  pieceChar: pieceChar,
+                                                  size: 50,
+                                                  isDragging: true,
                                                 ),
                                               ),
                                               childWhenDragging: Opacity(
-                                                opacity: 0.3,
-                                                child: _buildPieceText(pieceChar, isWhitePiece),
+                                                opacity: 0.25,
+                                                child: ChessPieceWidget(
+                                                  pieceChar: pieceChar,
+                                                  size: 38,
+                                                ),
                                               ),
-                                              child: _buildPieceText(pieceChar, isWhitePiece),
+                                              child: ChessPieceWidget(
+                                                pieceChar: pieceChar,
+                                                size: 38,
+                                              ),
                                             ),
                                         ],
                                       ),
@@ -492,24 +483,6 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
           ],
         ),
       ],
-    );
-  }
-
-  Widget _buildPieceText(String pieceChar, bool isWhitePiece) {
-    return Text(
-      _glyphs[pieceChar] ?? pieceChar,
-      style: TextStyle(
-        fontSize: 34,
-        height: 1.1,
-        color: isWhitePiece ? Colors.white : const Color(0xFF1E1E1E),
-        shadows: [
-          Shadow(
-            blurRadius: 3.0,
-            color: Colors.black.withOpacity(0.6),
-            offset: const Offset(1, 1),
-          ),
-        ],
-      ),
     );
   }
 }

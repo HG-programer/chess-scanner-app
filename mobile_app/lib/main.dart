@@ -4,6 +4,7 @@ import 'package:chess/chess.dart' as chess_logic;
 
 import 'models/engine_config.dart';
 import 'models/engine_profile.dart';
+import 'services/chess_engine_service.dart';
 import 'services/retention_service.dart';
 import 'services/telemetry_service.dart';
 import 'ui/calibration_sheet.dart';
@@ -69,10 +70,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   bool _isAiThinking = false;
   bool _isLiteMode = false;
 
+  final ChessEngineService _engineService = ChessEngineService();
+  String _coachAdvice = "💡 Control the 4 central squares with pawns and develop knights before bishops.";
+
   @override
   void initState() {
     super.initState();
     _checkDeviceSentinel();
+    _calculateEngineEvaluation(_currentFen);
   }
 
   void _checkDeviceSentinel() {
@@ -87,39 +92,21 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     });
   }
 
-  /// Evaluates the position and calculates the next best move
-  void _calculateEngineEvaluation(String fen) {
-    try {
-      final chess = chess_logic.Chess.fromFEN(fen);
-      if (chess.in_checkmate) {
-        setState(() {
-          _evalPercent = chess.turn == chess_logic.Color.WHITE ? 0.0 : 100.0;
-          _scoreText = "# Mate";
-          _bestMove = "Checkmate";
-        });
-        return;
-      }
+  /// Evaluates the position and calculates the next best move with Alpha-Beta & Cloud Engine
+  Future<void> _calculateEngineEvaluation(String fen) async {
+    final result = await _engineService.analyzePosition(
+      fen,
+      engineId: _currentEngine.id,
+      maxDepth: _currentEngine.defaultDepth,
+    );
 
-      final moves = chess.moves({'verbose': true});
-      if (moves.isEmpty) return;
-
-      // Pick best tactical move
-      final candidate = moves.first;
-      String moveStr = "e2e4";
-      if (candidate is Map) {
-        moveStr = '${candidate['from']}${candidate['to']}';
-      }
-
-      // Contextual evaluation variation based on engine strength
-      double eval = 50.0 + (_moveCount % 3 == 0 ? 3.5 : -2.0);
-      String score = eval > 50 ? "+0.${(eval - 50).toInt() * 10}" : "-0.${(50 - eval).toInt() * 10}";
-
-      setState(() {
-        _bestMove = moveStr;
-        _evalPercent = eval.clamp(5.0, 95.0);
-        _scoreText = score;
-      });
-    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _bestMove = result.bestMove;
+      _evalPercent = result.evalPercent;
+      _scoreText = result.evalText;
+      _coachAdvice = result.coachAdvice;
+    });
   }
 
   void _onMoveMade(String from, String to, String newFen) {
@@ -136,30 +123,27 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     if (_isPlayVsAi && newFen.contains(' b ')) {
       setState(() => _isAiThinking = true);
 
-      Timer(const Duration(milliseconds: 600), () {
+      Timer(const Duration(milliseconds: 550), () {
         if (!mounted) return;
         _makeAiMove(newFen);
       });
     }
   }
 
-  void _makeAiMove(String currentFen) {
+  Future<void> _makeAiMove(String currentFen) async {
     try {
-      final chess = chess_logic.Chess.fromFEN(currentFen);
-      if (chess.in_checkmate || chess.in_draw) {
-        setState(() => _isAiThinking = false);
-        return;
-      }
+      final result = await _engineService.analyzePosition(
+        currentFen,
+        engineId: _currentEngine.id,
+        maxDepth: _currentEngine.defaultDepth,
+      );
 
-      final legalMoves = chess.moves({'verbose': true});
-      if (legalMoves.isNotEmpty) {
-        // Pick an intelligent move
-        final moveObj = legalMoves[legalMoves.length > 2 ? 1 : 0];
-        if (moveObj is Map) {
-          final from = moveObj['from'].toString();
-          final to = moveObj['to'].toString();
-          chess.move({'from': from, 'to': to, 'promotion': 'q'});
+      if (result.bestMove.length >= 4) {
+        final from = result.bestMove.substring(0, 2);
+        final to = result.bestMove.substring(2, 4);
 
+        final chess = chess_logic.Chess.fromFEN(currentFen);
+        if (chess.move({'from': from, 'to': to, 'promotion': 'q'})) {
           setState(() {
             _fenHistory.add(_currentFen);
             _currentFen = chess.fen;
@@ -407,7 +391,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   Widget _buildScannerTab() {
-    final coachAdvice = EngineProfile.getCoachAdvice(_bestMove, _evalPercent, _moveCount);
+    final coachAdvice = _coachAdvice;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(14.0),
