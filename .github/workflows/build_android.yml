@@ -25,6 +25,7 @@ jobs:
       - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.29.3'
           channel: 'stable'
           cache: true
 
@@ -41,6 +42,24 @@ jobs:
           c = c.replace('<activity', '        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"ca-app-pub-3940256099942544~3347511713\"/>\n        <activity')
           with open(manifest, 'w') as f:
               f.write(c)
+
+          # Enforce minSdkVersion 21 for google_mobile_ads & camera
+          app_gradle = 'android/app/build.gradle'
+          with open(app_gradle, 'r') as f:
+              g = f.read()
+          g = g.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
+          g = g.replace('minSdkVersion = flutter.minSdkVersion', 'minSdkVersion = 21')
+          with open(app_gradle, 'w') as f:
+              f.write(g)
+
+          # Enforce Gradle 8.7 wrapper (prevents Gradle 9 incompatibility with plugins)
+          wrapper = 'android/gradle/wrapper/gradle-wrapper.properties'
+          with open(wrapper, 'r') as f:
+              w = f.read()
+          import re
+          w = re.sub(r'gradle-.*-(all|bin)\.zip', 'gradle-8.7-all.zip', w)
+          with open(wrapper, 'w') as f:
+              f.write(w)
           "
 
       - name: 📦 Install Flutter Dependencies

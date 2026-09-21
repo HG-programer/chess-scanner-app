@@ -19,7 +19,7 @@ dependencies:
   battery_plus: ^6.0.0
   device_info_plus: ^10.0.0
   # Monetization (Ads + IAP)
-  google_mobile_ads: ^5.1.0
+  google_mobile_ads: 5.1.0
   purchases_flutter: ^8.0.0
   # Retention & Reviews
   in_app_review: ^2.0.9
