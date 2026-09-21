@@ -55,14 +55,6 @@ jobs:
               txt = txt.replace('minSdkVersion = flutter.minSdkVersion', 'minSdkVersion = 21')
               with open(g, 'w') as f:
                   f.write(txt)
-
-          # Ensure Gradle wrapper is 8.7 (compatible with plugins)
-          for w in glob.glob('android/gradle/wrapper/gradle-wrapper.properties'):
-              with open(w, 'r') as f:
-                  wrap = f.read()
-              wrap = re.sub(r'gradle-.*-(all|bin)\.zip', 'gradle-8.7-all.zip', wrap)
-              with open(w, 'w') as f:
-                  f.write(wrap)
           "
 
       - name: 📦 Install Flutter Dependencies
