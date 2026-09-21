@@ -35,31 +35,34 @@ jobs:
           rm -rf android
           flutter create --org com.chessscanner --project-name chess_scanner --platforms android .
           python3 -c "
-          manifest = 'android/app/src/main/AndroidManifest.xml'
-          with open(manifest, 'r') as f:
-              c = f.read()
-          c = c.replace('<application', '    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <application')
-          c = c.replace('<activity', '        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"ca-app-pub-3940256099942544~3347511713\"/>\n        <activity')
-          with open(manifest, 'w') as f:
-              f.write(c)
+          import glob, re
+          # Update AndroidManifest.xml
+          for m in glob.glob('android/app/src/main/AndroidManifest.xml'):
+              with open(m, 'r') as f:
+                  c = f.read()
+              if 'android.permission.CAMERA' not in c:
+                  c = c.replace('<application', '    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <application')
+              if 'APPLICATION_ID' not in c:
+                  c = c.replace('<activity', '        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"ca-app-pub-3940256099942544~3347511713\"/>\n        <activity')
+              with open(m, 'w') as f:
+                  f.write(c)
 
-          # Enforce minSdkVersion 21 for google_mobile_ads & camera
-          app_gradle = 'android/app/build.gradle'
-          with open(app_gradle, 'r') as f:
-              g = f.read()
-          g = g.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
-          g = g.replace('minSdkVersion = flutter.minSdkVersion', 'minSdkVersion = 21')
-          with open(app_gradle, 'w') as f:
-              f.write(g)
+          # Update build.gradle / build.gradle.kts with minSdkVersion 21
+          for g in glob.glob('android/app/build.gradle*'):
+              with open(g, 'r') as f:
+                  txt = f.read()
+              txt = txt.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
+              txt = txt.replace('minSdkVersion = flutter.minSdkVersion', 'minSdkVersion = 21')
+              with open(g, 'w') as f:
+                  f.write(txt)
 
-          # Enforce Gradle 8.7 wrapper (prevents Gradle 9 incompatibility with plugins)
-          wrapper = 'android/gradle/wrapper/gradle-wrapper.properties'
-          with open(wrapper, 'r') as f:
-              w = f.read()
-          import re
-          w = re.sub(r'gradle-.*-(all|bin)\.zip', 'gradle-8.7-all.zip', w)
-          with open(wrapper, 'w') as f:
-              f.write(w)
+          # Ensure Gradle wrapper is 8.7 (compatible with plugins)
+          for w in glob.glob('android/gradle/wrapper/gradle-wrapper.properties'):
+              with open(w, 'r') as f:
+                  wrap = f.read()
+              wrap = re.sub(r'gradle-.*-(all|bin)\.zip', 'gradle-8.7-all.zip', wrap)
+              with open(w, 'w') as f:
+                  f.write(wrap)
           "
 
       - name: 📦 Install Flutter Dependencies
