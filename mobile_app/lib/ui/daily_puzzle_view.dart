@@ -15,7 +15,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
   final RetentionService _retentionService = RetentionService();
   DailyPuzzleData? _puzzle;
   int _puzzleIndex = 0;
-  bool _isLoading = true;
+  bool _isLoading = false;
 
   String _currentFen = "";
   String _lastValidFen = "";
@@ -28,20 +28,21 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
   @override
   void initState() {
     super.initState();
-    _loadDailyPuzzle();
+    // Instant frame-0 initialization from curated offline GM puzzles
+    _applyPuzzle(RetentionService.curatedPuzzles[0]);
+    _loadDailyPuzzle(showSpinner: false);
   }
 
-  Future<void> _loadDailyPuzzle() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadDailyPuzzle({bool showSpinner = false}) async {
+    if (showSpinner) setState(() => _isLoading = true);
     final puzzle = await _retentionService.getDailyPuzzle();
-    _applyPuzzle(puzzle);
+    if (mounted && (_puzzle == null || _puzzle!.id != puzzle.id || showSpinner)) {
+      _applyPuzzle(puzzle);
+    }
   }
 
   void _loadPuzzleByIndex(int index) {
-    setState(() {
-      _puzzleIndex = index;
-      _isLoading = true;
-    });
+    _puzzleIndex = index;
     final puzzle = _retentionService.getPuzzleByIndex(index);
     _applyPuzzle(puzzle);
   }

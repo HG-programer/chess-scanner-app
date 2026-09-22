@@ -25,9 +25,15 @@ class AdService {
 
   DateTime? _proPassExpiry;
   static const String _prefKeyProExpiry = 'pro_pass_expiry_ms';
+  VoidCallback? onInitialized;
+  Future<void>? _initFuture;
 
   /// Initialize Google Mobile Ads SDK safely
-  Future<void> initialize() async {
+  Future<void> initialize() {
+    return _initFuture ??= _doInitialize();
+  }
+
+  Future<void> _doInitialize() async {
     try {
       await MobileAds.instance.initialize();
       _isInitialized = true;
@@ -50,6 +56,8 @@ class AdService {
         }
       }
     } catch (_) {}
+
+    onInitialized?.call();
   }
 
   /// Check if user has an active 30-minute Pro Pass

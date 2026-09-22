@@ -15,11 +15,11 @@ import 'ui/engine_selector_sheet.dart';
 import 'ui/eval_bar.dart';
 import 'ui/interactive_chessboard.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Safely initialize AdMob monetization (with graceful fallback for emulators)
-  await AdService.instance.initialize();
   runApp(const ChessScannerApp());
+  // Non-blocking background AdMob initialization (instant frame 0 render)
+  unawaited(AdService.instance.initialize());
 }
 
 class ChessScannerApp extends StatelessWidget {
@@ -114,8 +114,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     if (AdService.instance.hasActiveProPass) {
       _isPremium = true;
     }
+    // Listen for background AdService initialization completion
+    AdService.instance.onInitialized = () {
+      if (mounted && AdService.instance.hasActiveProPass) {
+        setState(() {
+          _isPremium = true;
+        });
+      }
+    };
     _checkDeviceSentinel();
-    _calculateEngineEvaluation(_currentFen);
   }
 
   void _checkDeviceSentinel() {

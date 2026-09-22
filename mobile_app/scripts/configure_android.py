@@ -119,10 +119,8 @@ for m in glob.glob("android/app/src/main/AndroidManifest.xml"):
         if removals:
             c = c.replace("<application", removals + "    <application")
 
-    # Metadata: AdMob APPLICATION_ID & Impeller
-    meta = f"""        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="{admob_app_id}"/>
-        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="true"/>
-"""
+    # Metadata: AdMob APPLICATION_ID
+    meta = f"""        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="{admob_app_id}"/>\n"""
     if "APPLICATION_ID" not in c:
         c = c.replace("<activity", meta + "        <activity")
     else:
@@ -131,15 +129,20 @@ for m in glob.glob("android/app/src/main/AndroidManifest.xml"):
             f'<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="{admob_app_id}"/>',
             c,
         )
-        if "EnableImpeller" not in c:
-            c = c.replace("<activity", '        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="true"/>\n        <activity')
+
+    # Strip any EnableImpeller metadata (prevents slow Vulkan software warmup on emulators/devices)
+    c = re.sub(
+        r'\s*<meta-data\s+android:name="io\.flutter\.embedding\.android\.EnableImpeller"\s+android:value="[^"]*"\s*/>',
+        '',
+        c,
+    )
 
     # App Label
     c = re.sub(r'android:label="[^"]*"', 'android:label="ChessSnap"', c)
 
     with open(m, "w", encoding="utf-8") as f:
         f.write(c)
-    print(f"[configure_android] Updated {m} (Impeller enabled, RECORD_AUDIO & storage stripped).")
+    print(f"[configure_android] Updated {m} (AdMob configured, RECORD_AUDIO & storage stripped, Impeller stripped for fast cold start).")
 
 # 3. Configure build.gradle / build.gradle.kts
 groovy_signing = f"""    signingConfigs {{
