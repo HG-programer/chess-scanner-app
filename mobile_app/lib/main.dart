@@ -191,21 +191,139 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void _resetBoard() {
+    _openNewMatchSheet();
+  }
+
+  void _openNewMatchSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E1E24),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('⚔️ Start New Match', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Play as White or Black against AI, or jump directly into famous grandmaster opening battles.',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+
+              // Side Selection (White or Black)
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.circle, color: Colors.white, size: 16),
+                      label: const Text('Play as White', style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2C2D35),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _startNewMatch(playAsWhite: true);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.circle, color: Colors.grey, size: 16),
+                      label: const Text('Play as Black', style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2C2D35),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _startNewMatch(playAsWhite: false);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Divider(color: Colors.white12),
+              const SizedBox(height: 8),
+
+              const Text('Grandmaster Opening Presets', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.amber)),
+              const SizedBox(height: 10),
+
+              ...ChessEngineService.openingPresets.map((preset) {
+                return Card(
+                  color: const Color(0xFF262730),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    dense: true,
+                    title: Text(preset.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                    subtitle: Text('${preset.eco} • ${preset.description}', style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                    trailing: const Icon(Icons.play_arrow, color: Colors.amber),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _startNewMatch(
+                        playAsWhite: preset.playAsWhite,
+                        customFen: preset.fen,
+                        presetName: preset.name,
+                      );
+                    },
+                  ),
+                );
+              }).toList(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _startNewMatch({required bool playAsWhite, String? customFen, String? presetName}) {
     setState(() {
       _fenHistory.clear();
-      _currentFen = _startFen;
+      _currentFen = customFen ?? _startFen;
       _moveCount = 0;
+      _isWhiteOrientation = playAsWhite;
       _isAiThinking = false;
       _bestMove = "e2e4";
       _evalPercent = 50.0;
       _scoreText = "0.00";
     });
 
-    // Occasionally show interstitial ad on game reset if not premium
+    _calculateEngineEvaluation(_currentFen);
+
+    // Occasionally show interstitial ad on new game if not premium
     AdService.instance.showInterstitialAd();
 
+    // If user chose to play as Black from starting board, have AI play White's opening move!
+    if (!playAsWhite && customFen == null && _isPlayVsAi) {
+      _triggerAiCounterMove(_startFen);
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Board reset to standard starting position.')),
+      SnackBar(
+        backgroundColor: const Color(0xFF1E1E1E),
+        content: Text(presetName != null ? 'Started: $presetName' : (playAsWhite ? 'Game started: You play White' : 'Game started: You play Black')),
+      ),
     );
   }
 
@@ -512,14 +630,30 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               ),
             ],
           ),
-          ElevatedButton.icon(
-            onPressed: _openEngineSelector,
-            icon: const Icon(Icons.tune, size: 16),
-            label: const Text('Change Engine'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF333333),
-              foregroundColor: Colors.white,
-            ),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _openNewMatchSheet,
+                icon: const Icon(Icons.play_arrow, size: 16),
+                label: const Text('Match'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: _openEngineSelector,
+                icon: const Icon(Icons.tune, size: 16),
+                label: const Text('Engine'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF333333),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+              ),
+            ],
           ),
         ],
       ),
