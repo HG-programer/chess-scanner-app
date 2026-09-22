@@ -29,35 +29,15 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 🛠️ Generate Official Android Platform
+      - name: 🛠️ Generate Official Android Platform & Configure Release Signing
         working-directory: mobile_app
+        env:
+          ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID || '' }}
         run: |
           rm -rf android
           flutter create --org com.chessscanner --project-name chess_scanner --platforms android .
           cp -rf assets/icons/mipmap-* android/app/src/main/res/
-          python3 -c "
-          import glob, re
-          # Update AndroidManifest.xml
-          for m in glob.glob('android/app/src/main/AndroidManifest.xml'):
-              with open(m, 'r') as f:
-                  c = f.read()
-              if 'android.permission.CAMERA' not in c:
-                  c = c.replace('<application', '    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />\n    <application')
-              if 'APPLICATION_ID' not in c:
-                  c = c.replace('<activity', '        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"ca-app-pub-3940256099942544~3347511713\"/>\n        <activity')
-              c = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"ChessSnap\"', c)
-              with open(m, 'w') as f:
-                  f.write(c)
-
-          # Update build.gradle / build.gradle.kts with minSdkVersion 21
-          for g in glob.glob('android/app/build.gradle*'):
-              with open(g, 'r') as f:
-                  txt = f.read()
-              txt = txt.replace('minSdkVersion flutter.minSdkVersion', 'minSdkVersion 21')
-              txt = txt.replace('minSdkVersion = flutter.minSdkVersion', 'minSdkVersion = 21')
-              with open(g, 'w') as f:
-                  f.write(txt)
-          "
+          python3 scripts/configure_android.py
 
       - name: 📦 Install Flutter Dependencies
         working-directory: mobile_app

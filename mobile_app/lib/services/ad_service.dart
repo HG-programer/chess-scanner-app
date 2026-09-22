@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/admob_config.dart';
 
 /// Production-ready AdMob Monetization Service.
 /// Handles initialization, pre-loading, rewarded video ads, banner ads,
@@ -11,18 +12,10 @@ class AdService {
   static final AdService instance = AdService._internal();
   AdService._internal();
 
-  // ==========================================
-  // ADMOB AD UNIT IDS
-  // Replace these test IDs with your production IDs from Google AdMob Console
-  // ==========================================
-  static const String _testAndroidBannerId = 'ca-app-pub-3940256099942544/6300978111';
-  static const String _testAndroidRewardedId = 'ca-app-pub-3940256099942544/5224354917';
-  static const String _testAndroidInterstitialId = 'ca-app-pub-3940256099942544/1033173712';
-
-  // Production Ad Unit IDs (swap with your AdMob IDs when ready for Play Store)
-  static String bannerAdUnitId = _testAndroidBannerId;
-  static String rewardedAdUnitId = _testAndroidRewardedId;
-  static String interstitialAdUnitId = _testAndroidInterstitialId;
+  // Dynamic Ad Unit IDs from AdMobConfig
+  static String get bannerAdUnitId => AdMobConfig.bannerId;
+  static String get rewardedAdUnitId => AdMobConfig.rewardedId;
+  static String get interstitialAdUnitId => AdMobConfig.interstitialId;
 
   bool _isInitialized = false;
   RewardedAd? _rewardedAd;
