@@ -69,6 +69,7 @@ We may update this Privacy Policy from time to time to reflect technological upd
 ---
 
 ## 9. Contact Information
-If you have questions, inquiries, or feedback regarding this Privacy Policy, please contact:
+If you have questions, inquiries, or feedback regarding this Privacy Policy or data safety, please contact:
 - **Developer / Publisher:** ChessSnap Support Team
+- **Official Developer Email:** hgtarget650@gmail.com
 - **GitHub Repository:** [https://github.com/HG-programer/chess-scanner-app](https://github.com/HG-programer/chess-scanner-app)

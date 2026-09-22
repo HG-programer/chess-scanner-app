@@ -704,7 +704,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 '• No Audio Recording: Microphone access (RECORD_AUDIO) is disabled and completely removed.\n\n'
                 '• No Storage Permissions: The app does not access personal photos, media, or files.\n\n'
                 '• Advertising & In-App Purchases: Google Mobile Ads (with UMP consent for GDPR/CCPA) and Google Play Billing Library 9.\n\n'
-                '• Open Source: We respect all third-party and open-source licenses.',
+                '• Open Source: We respect all third-party and open-source licenses.\n\n'
+                '• Developer Contact: hgtarget650@gmail.com',
                 style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
               ),
             ],
