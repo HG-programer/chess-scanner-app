@@ -178,6 +178,28 @@ class AdService {
     );
   }
 
+  int _matchesPlayedSinceAd = 0;
+  DateTime? _lastInterstitialTime;
+
+  /// Shows interstitial ad responsibly without annoying the user:
+  /// - Only shows after every 4 matches (not every match!)
+  /// - Enforces at least 4 minutes between full-screen ads
+  /// - Never interrupts users with an active Pro Pass
+  void showInterstitialWithCooldown({int matchesThreshold = 4, int minMinutesCooldown = 4}) {
+    if (hasActiveProPass) return;
+    _matchesPlayedSinceAd++;
+    if (_matchesPlayedSinceAd < matchesThreshold) return;
+
+    if (_lastInterstitialTime != null) {
+      final elapsedMinutes = DateTime.now().difference(_lastInterstitialTime!).inMinutes;
+      if (elapsedMinutes < minMinutesCooldown) return;
+    }
+
+    _matchesPlayedSinceAd = 0;
+    _lastInterstitialTime = DateTime.now();
+    showInterstitialAd();
+  }
+
   /// Show Interstitial ad (e.g. after board scan or game reset)
   void showInterstitialAd() {
     if (_interstitialAd != null && !hasActiveProPass) {

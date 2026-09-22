@@ -19,6 +19,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
 
   String _currentFen = "";
   String _lastValidFen = "";
+  String? _lastMoveUci;
   int _moveIndex = 0;
   String _statusMessage = "Find the best move!";
   Color _statusColor = Colors.amber;
@@ -53,6 +54,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
       _isLoading = false;
       _moveIndex = 0;
       _isResetting = false;
+      _lastMoveUci = null;
       _statusMessage = puzzle.isWhiteToMove ? "⚪ White to move and win!" : "⚫ Black to move and win!";
       _statusColor = Colors.amber;
     });
@@ -68,6 +70,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
     if (playedMove == expectedMove || playedMove.startsWith(expectedMove.substring(0, 4))) {
       _moveIndex++;
       _lastValidFen = newFen;
+      _lastMoveUci = '$from$to';
 
       if (_moveIndex >= _puzzle!.solution.length) {
         setState(() {
@@ -133,6 +136,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
         setState(() {
           _currentFen = chess.fen;
           _lastValidFen = chess.fen;
+          _lastMoveUci = '$from$to';
         });
       }
     } catch (_) {}
@@ -145,6 +149,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
         _lastValidFen = _puzzle!.fen;
         _moveIndex = 0;
         _isResetting = false;
+        _lastMoveUci = null;
         _statusMessage = _puzzle!.isWhiteToMove ? "⚪ White to move and win!" : "⚫ Black to move and win!";
         _statusColor = Colors.amber;
       });
@@ -256,6 +261,7 @@ class _DailyPuzzleViewState extends State<DailyPuzzleView> {
           InteractiveChessboard(
             fen: _currentFen,
             bestMove: null,
+            lastMoveUci: _lastMoveUci,
             isWhiteOrientation: _puzzle!.isWhiteToMove,
             isPlayVsAi: false,
             onMoveMade: _onMove,

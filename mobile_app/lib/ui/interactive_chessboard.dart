@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:chess/chess.dart' as chess_logic;
 import 'chess_piece_widget.dart';
 
@@ -9,12 +10,19 @@ class _BoardCoord {
   const _BoardCoord(this.row, this.col);
 }
 
-/// Interactive 8x8 Chessboard Widget with Live Move Handling, Turn Indicators,
-/// AI Move Auto-Reply support, Drag-and-Drop, and Best Move Arrows.
-/// Fully responsive across Mobile Portrait and Landscape Tablet/LDPlayer screens.
+/// Interactive 8x8 Chessboard Widget featuring:
+/// - Tap-to-move & drag-and-drop dual support
+/// - Last move highlighting for both player and AI moves
+/// - Red pulse highlight on the King when in Check
+/// - Visual best move tactical hint arrow with user toggle
+/// - Full pawn underpromotion selection dialog (Queen, Knight, Rook, Bishop)
+/// - Haptic feedback on moves, captures, checks, and checkmate
+/// - 100% rigid squares with zero black horizontal stripes
+/// - Responsive layout for phones and landscape emulators (LDPlayer)
 class InteractiveChessboard extends StatefulWidget {
   final String fen;
   final String? bestMove; // e.g. "e2e4"
+  final String? lastMoveUci; // e.g. "e7e5" (highlights both player & AI moves)
   final bool isWhiteOrientation;
   final bool isPlayVsAi;
   final bool isAiThinking;
@@ -28,6 +36,7 @@ class InteractiveChessboard extends StatefulWidget {
     Key? key,
     required this.fen,
     this.bestMove,
+    this.lastMoveUci,
     this.isWhiteOrientation = true,
     this.isPlayVsAi = true,
     this.isAiThinking = false,
@@ -48,11 +57,13 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
   List<String> _legalDestinations = [];
   String? _lastFrom;
   String? _lastTo;
+  bool _showHint = false;
 
   @override
   void initState() {
     super.initState();
     _loadChess();
+    _syncLastMove();
   }
 
   @override
@@ -62,6 +73,18 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
       _loadChess();
       _selectedSquare = null;
       _legalDestinations = [];
+    }
+    if (oldWidget.lastMoveUci != widget.lastMoveUci) {
+      _syncLastMove();
+    }
+  }
+
+  void _syncLastMove() {
+    if (widget.lastMoveUci != null && widget.lastMoveUci!.length >= 4) {
+      setState(() {
+        _lastFrom = widget.lastMoveUci!.substring(0, 2);
+        _lastTo = widget.lastMoveUci!.substring(2, 4);
+      });
     }
   }
 
@@ -122,20 +145,93 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     }
   }
 
+  /// Prompt user to choose pawn promotion piece (Queen, Knight, Rook, Bishop)
+  Future<String?> _showPromotionDialog(bool isWhite) async {
+    final pieces = [
+      {'char': isWhite ? 'Q' : 'q', 'name': 'Queen', 'val': 'q'},
+      {'char': isWhite ? 'N' : 'n', 'name': 'Knight', 'val': 'n'},
+      {'char': isWhite ? 'R' : 'r', 'name': 'Rook', 'val': 'r'},
+      {'char': isWhite ? 'B' : 'b', 'name': 'Bishop', 'val': 'b'},
+    ];
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E24),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Center(
+            child: Text(
+              'Promote Pawn',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+          content: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: pieces.map((p) {
+              return InkWell(
+                onTap: () => Navigator.pop(ctx, p['val']),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2B2B36),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ChessPieceWidget(pieceChar: p['char']!, size: 42),
+                      const SizedBox(height: 4),
+                      Text(p['name']!, style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
   /// Execute move from [from] to [to]
-  void _executeMove(String from, String to) {
+  Future<void> _executeMove(String from, String to) async {
     if (widget.isAiThinking) return;
 
-    setState(() {
-      _lastFrom = from;
-      _lastTo = to;
-    });
+    // Check if this move is a pawn promotion
+    final pieceChar = _chess.get(from)?.type.name.toLowerCase();
+    final isPawn = pieceChar == 'p';
+    final isWhite = _chess.turn == chess_logic.Color.WHITE;
+    final isPromo = isPawn && ((isWhite && from[1] == '7' && to[1] == '8') || (!isWhite && from[1] == '2' && to[1] == '1'));
+
+    String promoPiece = 'q';
+    if (isPromo) {
+      final chosen = await _showPromotionDialog(isWhite);
+      promoPiece = chosen ?? 'q';
+    }
 
     try {
-      final success = _chess.move({'from': from, 'to': to, 'promotion': 'q'});
+      final isCapture = _chess.get(to) != null;
+      final success = _chess.move({'from': from, 'to': to, 'promotion': promoPiece});
       if (success) {
+        // Haptic feedback
+        if (_chess.in_checkmate) {
+          HapticFeedback.heavyImpact();
+        } else if (_chess.in_check) {
+          HapticFeedback.mediumImpact();
+        } else if (isCapture) {
+          HapticFeedback.mediumImpact();
+        } else {
+          HapticFeedback.lightImpact();
+        }
+
         final newFen = _chess.fen;
         setState(() {
+          _lastFrom = from;
+          _lastTo = to;
           _selectedSquare = null;
           _legalDestinations = [];
         });
@@ -178,6 +274,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     if (pieceChar != null) {
       final isWhitePiece = pieceChar == pieceChar.toUpperCase();
       if ((isWhiteTurn && isWhitePiece) || (!isWhiteTurn && !isWhitePiece) || !widget.isPlayVsAi) {
+        HapticFeedback.selectionClick();
         setState(() {
           _selectedSquare = sq;
           _legalDestinations = _getLegalMovesForSquare(sq);
@@ -200,6 +297,22 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
   Widget build(BuildContext context) {
     final grid = _parseFenGrid(widget.fen);
     final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
+    final inCheck = _chess.in_check;
+
+    // Locate the King square of the side to move if in check
+    String? checkKingSquare;
+    if (inCheck) {
+      final targetKing = isWhiteTurn ? 'K' : 'k';
+      for (int r = 0; r < 8; r++) {
+        for (int c = 0; c < 8; c++) {
+          if (grid[r][c] == targetKing) {
+            checkKingSquare = _coordsToSquare(r, c);
+            break;
+          }
+        }
+        if (checkKingSquare != null) break;
+      }
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -207,7 +320,6 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
         final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
 
         // In landscape (LDPlayer), constrain board height so it never exceeds screen height.
-        // In portrait (Phones), board fills the available width (up to 540 max).
         final maxAllowedHeight = isLandscape ? math.max(260.0, screenHeight - 160.0) : 540.0;
         final boardSize = math.min(constraints.maxWidth, maxAllowedHeight);
         final squareSize = boardSize / 8.0;
@@ -217,19 +329,20 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 1. Status / Turn Bar
+            // 1. Status / Turn Bar with Check Indicator & Hint Button
             SizedBox(
               width: boardSize,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
+                  color: inCheck ? Colors.red.withOpacity(0.18) : const Color(0xFF1E1E1E),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white12),
+                  border: Border.all(color: inCheck ? Colors.redAccent.withOpacity(0.6) : Colors.white12),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    // Turn / Status indicator
                     Row(
                       children: [
                         Container(
@@ -237,62 +350,114 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                           height: 12,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isWhiteTurn ? Colors.white : Colors.grey[800],
+                            color: inCheck
+                                ? Colors.redAccent
+                                : (isWhiteTurn ? Colors.white : Colors.grey[800]),
                             border: Border.all(color: Colors.white70, width: 1.5),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
                           widget.isAiThinking
-                              ? '🤖 Engine is thinking...'
-                              : (isWhiteTurn ? 'White to Move' : 'Black to Move'),
+                              ? '🤖 Engine thinking...'
+                              : (inCheck
+                                  ? '⚠️ ${isWhiteTurn ? "White" : "Black"} in Check!'
+                                  : (isWhiteTurn ? 'White to Move' : 'Black to Move')),
                           style: TextStyle(
-                            color: widget.isAiThinking ? Colors.amber : Colors.white,
+                            color: inCheck
+                                ? Colors.redAccent
+                                : (widget.isAiThinking ? Colors.amber : Colors.white),
                             fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
                     ),
-                    // Play vs AI Toggle
-                    GestureDetector(
-                      onTap: () {
-                        if (widget.onToggleMode != null) {
-                          widget.onToggleMode!(!widget.isPlayVsAi);
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: widget.isPlayVsAi
-                              ? Colors.amber.withOpacity(0.2)
-                              : Colors.blueAccent.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              widget.isPlayVsAi ? Icons.smart_toy : Icons.people,
-                              size: 14,
-                              color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              widget.isPlayVsAi ? 'Vs Engine' : 'Analysis',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+
+                    // Controls: Hint Toggle + Mode Toggle
+                    Row(
+                      children: [
+                        // Hint Arrow Toggle
+                        if (widget.bestMove != null && widget.bestMove!.length >= 4 && widget.bestMove != 'mate' && widget.bestMove != 'none')
+                          GestureDetector(
+                            onTap: () {
+                              setState(() => _showHint = !_showHint);
+                              HapticFeedback.selectionClick();
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _showHint ? Colors.green.withOpacity(0.25) : Colors.white10,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: _showHint ? Colors.greenAccent : Colors.white24,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.lightbulb,
+                                    size: 13,
+                                    color: _showHint ? Colors.greenAccent : Colors.white70,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'Hint',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: _showHint ? Colors.greenAccent : Colors.white70,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
+
+                        // Play vs AI Toggle
+                        GestureDetector(
+                          onTap: () {
+                            if (widget.onToggleMode != null) {
+                              widget.onToggleMode!(!widget.isPlayVsAi);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: widget.isPlayVsAi
+                                  ? Colors.amber.withOpacity(0.2)
+                                  : Colors.blueAccent.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  widget.isPlayVsAi ? Icons.smart_toy : Icons.people,
+                                  size: 13,
+                                  color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  widget.isPlayVsAi ? 'Vs AI' : '2-Player',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
@@ -330,6 +495,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                 final isLight = (r + c) % 2 == 0;
                                 final isSelected = sq == _selectedSquare;
                                 final isLegal = _legalDestinations.contains(sq);
+                                final isCheckKing = sq == checkKingSquare;
 
                                 // Get piece directly from parsed FEN grid
                                 final pieceChar = grid[r][c];
@@ -343,11 +509,19 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                     },
                                     builder: (ctx, candidateData, rejectedData) {
                                       final isTrail = sq == _lastFrom || sq == _lastTo;
-                                      final tileColor = isSelected
-                                          ? const Color(0xFFBBCB44)
-                                          : (candidateData.isNotEmpty
-                                              ? const Color(0xFF769656)
-                                              : (isTrail ? const Color(0xFFCED56A) : bgColor));
+
+                                      Color tileColor;
+                                      if (isCheckKing) {
+                                        tileColor = const Color(0xFFE53935).withOpacity(0.72);
+                                      } else if (isSelected) {
+                                        tileColor = const Color(0xFFBBCB44);
+                                      } else if (candidateData.isNotEmpty) {
+                                        tileColor = const Color(0xFF769656);
+                                      } else if (isTrail) {
+                                        tileColor = const Color(0xFFCED56A);
+                                      } else {
+                                        tileColor = bgColor;
+                                      }
 
                                       return GestureDetector(
                                         onTap: () => _onSquareTap(sq, pieceChar),
@@ -427,6 +601,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                                         return Offset(liftSize / 2.0, liftSize / 2.0);
                                                       },
                                                       onDragStarted: () {
+                                                        HapticFeedback.selectionClick();
                                                         setState(() {
                                                           _selectedSquare = sq;
                                                           _legalDestinations = _getLegalMovesForSquare(sq);
@@ -472,8 +647,8 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                         }),
                       ),
 
-                      // Best Move Arrow Layer (e.g. e2e4)
-                      if (widget.bestMove != null && widget.bestMove!.length >= 4)
+                      // Best Move Tactical Arrow Layer (drawn only when hint is enabled)
+                      if (_showHint && widget.bestMove != null && widget.bestMove!.length >= 4)
                         IgnorePointer(
                           child: CustomPaint(
                             size: Size(boardSize, boardSize),
@@ -500,19 +675,28 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                   children: [
                     if (widget.onFlipBoard != null)
                       TextButton.icon(
-                        onPressed: widget.onFlipBoard,
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          widget.onFlipBoard!();
+                        },
                         icon: const Icon(Icons.swap_vert, size: 18, color: Colors.white70),
                         label: const Text('Flip', style: TextStyle(color: Colors.white70, fontSize: 12)),
                       ),
                     if (widget.onUndoMove != null)
                       TextButton.icon(
-                        onPressed: widget.onUndoMove,
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          widget.onUndoMove!();
+                        },
                         icon: const Icon(Icons.undo, size: 18, color: Colors.white70),
                         label: const Text('Takeback', style: TextStyle(color: Colors.white70, fontSize: 12)),
                       ),
                     if (widget.onResetBoard != null)
                       TextButton.icon(
-                        onPressed: widget.onResetBoard,
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          widget.onResetBoard!();
+                        },
                         icon: const Icon(Icons.refresh, size: 18, color: Colors.amber),
                         label: const Text('New Game', style: TextStyle(color: Colors.amber, fontSize: 12)),
                       ),
@@ -528,23 +712,30 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
 }
 
 /// Custom painter that draws a clean vector arrow for the AI's best move.
+/// Bulletproofed against non-algebraic strings like 'mate' or 'none'.
 class ArrowPainter extends CustomPainter {
   final String bestMove; // e.g. "e2e4"
   final bool isWhite;
 
   ArrowPainter({required this.bestMove, required this.isWhite});
 
-  Offset _squareToCenter(String sq, double sqSize) {
-    final col = sq.codeUnitAt(0) - 'a'.codeUnitAt(0);
-    final rank = int.parse(sq[1]);
+  Offset? _squareToCenter(String sq, double sqSize) {
+    if (sq.length < 2) return null;
+    final fileChar = sq[0].toLowerCase();
+    final rankDigit = int.tryParse(sq[1]);
+
+    if (rankDigit == null || rankDigit < 1 || rankDigit > 8) return null;
+    if (fileChar.codeUnitAt(0) < 'a'.codeUnitAt(0) || fileChar.codeUnitAt(0) > 'h'.codeUnitAt(0)) return null;
+
+    final col = fileChar.codeUnitAt(0) - 'a'.codeUnitAt(0);
     final x = (isWhite ? col : 7 - col) * sqSize + sqSize / 2;
-    final y = (isWhite ? 8 - rank : rank - 1) * sqSize + sqSize / 2;
+    final y = (isWhite ? 8 - rankDigit : rankDigit - 1) * sqSize + sqSize / 2;
     return Offset(x, y);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (bestMove.length < 4) return;
+    if (bestMove.length < 4 || bestMove == 'mate' || bestMove == 'none') return;
     final sqSize = size.width / 8.0;
 
     final fromSq = bestMove.substring(0, 2);
@@ -552,6 +743,7 @@ class ArrowPainter extends CustomPainter {
 
     final start = _squareToCenter(fromSq, sqSize);
     final end = _squareToCenter(toSq, sqSize);
+    if (start == null || end == null) return;
 
     final linePaint = Paint()
       ..color = const Color(0xFF43A047).withOpacity(0.82)
@@ -571,7 +763,7 @@ class ArrowPainter extends CustomPainter {
       end.dy - (headLength * 0.5) * math.sin(angle),
     );
 
-    // Draw main arrow body shaft
+    // Draw main arrow shaft
     canvas.drawLine(start, adjustedEnd, linePaint);
 
     // Draw clean triangle arrowhead

@@ -60,6 +60,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   static const String _startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   String _currentFen = _startFen;
   final List<String> _fenHistory = [];
+  String? _lastMoveUci;
 
   // Engine & Evaluation State
   EngineProfile _currentEngine = EngineProfile.coach; // Base is Coach (Free)
@@ -77,6 +78,34 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   final ChessEngineService _engineService = ChessEngineService();
   String _coachAdvice = "💡 Control the 4 central squares with pawns and develop knights before bishops.";
+
+  /// Display a non-intrusive floating SnackBar that clears previous ones
+  void _showNotice(String message, {Color? bg, IconData? icon}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            if (icon != null) ...[
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: bg ?? const Color(0xFF1E293B),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(milliseconds: 2000),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -123,6 +152,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   void _onMoveMade(String from, String to, String newFen) {
     _fenHistory.add(_currentFen);
     _moveCount++;
+    _lastMoveUci = '$from$to';
 
     setState(() {
       _currentFen = newFen;
@@ -163,11 +193,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       final aiMoveUci = result.bestMove;
       bool moved = false;
 
+      String? executedAiMoveUci;
       if (aiMoveUci.length >= 4 && aiMoveUci != 'mate' && aiMoveUci != 'none') {
         final from = aiMoveUci.substring(0, 2);
         final to = aiMoveUci.substring(2, 4);
         final promo = aiMoveUci.length >= 5 ? aiMoveUci[4] : 'q';
         moved = chess.move({'from': from, 'to': to, 'promotion': promo});
+        if (moved) {
+          executedAiMoveUci = '$from$to';
+        }
       }
 
       // Dynamic fallback: If calculated move failed to execute, execute first legal move
@@ -175,11 +209,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         final legalMoves = chess.moves({'verbose': true});
         if (legalMoves.isNotEmpty) {
           final lm = legalMoves.first as Map;
+          final f = lm['from'].toString();
+          final t = lm['to'].toString();
           moved = chess.move({
-            'from': lm['from'].toString(),
-            'to': lm['to'].toString(),
+            'from': f,
+            'to': t,
             'promotion': lm['promotion']?.toString() ?? 'q',
           });
+          if (moved) {
+            executedAiMoveUci = '$f$t';
+          }
         }
       }
 
@@ -190,6 +229,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           _currentFen = chess.fen;
           _isAiThinking = false;
           _moveCount++;
+          if (executedAiMoveUci != null) {
+            _lastMoveUci = executedAiMoveUci;
+          }
         });
 
         _calculateEngineEvaluation(chess.fen);
@@ -205,13 +247,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       setState(() {
         _currentFen = _fenHistory.removeLast();
         _isAiThinking = false;
+        _lastMoveUci = null;
         if (_moveCount > 0) _moveCount--;
       });
       _calculateEngineEvaluation(_currentFen);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('At the beginning of the game.')),
-      );
+      _showNotice('At the beginning of the game.', icon: Icons.info_outline);
     }
   }
 
@@ -332,23 +373,23 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       _bestMove = "e2e4";
       _evalPercent = 50.0;
       _scoreText = "0.00";
+      _lastMoveUci = null;
     });
 
     _calculateEngineEvaluation(_currentFen);
 
-    // Occasionally show interstitial ad on new game if not premium
-    AdService.instance.showInterstitialAd();
+    // Occasionally show interstitial ad on new game if not premium (with cooldown)
+    AdService.instance.showInterstitialWithCooldown();
 
     // If user chose to play as Black from starting board, have AI play White's opening move!
     if (!playAsWhite && customFen == null && _isPlayVsAi) {
       _triggerAiCounterMove(_startFen);
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF1E1E1E),
-        content: Text(presetName != null ? 'Started: $presetName' : (playAsWhite ? 'Game started: You play White' : 'Game started: You play Black')),
-      ),
+    _showNotice(
+      presetName != null
+          ? '⚔️ Started: $presetName'
+          : (playAsWhite ? '⚔️ Game started: You play White' : '⚔️ Game started: You play Black'),
     );
   }
 
@@ -374,12 +415,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       _retentionService.onSuccessfulScan(confidence: 0.98);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: Colors.green,
-            content: Text('✅ Board Scanned Successfully! Analyzing position with Stockfish...'),
-          ),
-        );
+        _showNotice('✅ Board Scanned Successfully! Analyzing position...', bg: Colors.green.shade700);
       }
     }
   }
@@ -397,12 +433,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             _currentEngine = newEngine;
           });
           _calculateEngineEvaluation(_currentFen);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: const Color(0xFF1E1E1E),
-              content: Text('Switched to ${newEngine.name} (${newEngine.elo} ELO)'),
-            ),
-          );
+          _showNotice('Switched to ${newEngine.name} (${newEngine.elo} ELO)', icon: Icons.swap_horiz);
         },
         onOpenPaywall: _openPaywallSheet,
         onWatchAdForTempUnlock: _watchAdForProPass,
@@ -418,12 +449,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         setState(() {
           _isPremium = true;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: Colors.amber,
-            content: Text('🎬 Reward Earned! 30-Minute Pro Pass activated.'),
-          ),
-        );
+        _showNotice('🎬 Reward Earned! 30-Minute Pro Pass activated.', bg: Colors.amber.shade900, icon: Icons.verified);
       },
     );
   }
@@ -514,9 +540,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               onPressed: () {
                 setState(() => _isPremium = true);
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(backgroundColor: Colors.teal, content: Text('🎉 Welcome to Pro! All engines unlocked.')),
-                );
+                _showNotice('🎉 Welcome to Pro! All engines unlocked.', bg: Colors.teal.shade700);
               },
             ),
             const SizedBox(height: 8),
@@ -543,9 +567,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         activeFen: _currentFen,
         ambiguousSquares: const ["c4", "f1"],
         onPieceCorrected: (square, piece) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Updated $square to ${piece ?? "Empty"}')),
-          );
+          _showNotice('Updated $square to ${piece ?? "Empty"}');
         },
         onSubmitReport: () {
           _telemetryService.submitReport(
@@ -559,9 +581,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             boardType: "wooden_3d",
           );
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Anonymous report submitted! Thank you.')),
-          );
+          _showNotice('Anonymous report submitted! Thank you.', icon: Icons.check_circle_outline);
         },
       ),
     );
@@ -860,6 +880,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 child: InteractiveChessboard(
                   fen: _currentFen,
                   bestMove: _bestMove,
+                  lastMoveUci: _lastMoveUci,
                   isWhiteOrientation: _isWhiteOrientation,
                   isPlayVsAi: _isPlayVsAi,
                   isAiThinking: _isAiThinking,
@@ -885,7 +906,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     ChessEvalBar(evalPercent: _evalPercent, scoreText: _scoreText),
                     const SizedBox(height: 10),
                     _buildEngineSelectorCard(),
-                    if (_currentEngine.id == 'coach') _buildCoachAdviceCard(coachAdvice),
+                    _buildCoachAdviceCard(coachAdvice),
                     const SizedBox(height: 10),
                     _buildBestMoveCard(),
                     const SizedBox(height: 10),
@@ -920,13 +941,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           ChessEvalBar(evalPercent: _evalPercent, scoreText: _scoreText),
           const SizedBox(height: 10),
           _buildEngineSelectorCard(),
-          if (_currentEngine.id == 'coach') _buildCoachAdviceCard(coachAdvice),
+          _buildCoachAdviceCard(coachAdvice),
           const SizedBox(height: 10),
 
           // 8x8 Chessboard
           InteractiveChessboard(
             fen: _currentFen,
             bestMove: _bestMove,
+            lastMoveUci: _lastMoveUci,
             isWhiteOrientation: _isWhiteOrientation,
             isPlayVsAi: _isPlayVsAi,
             isAiThinking: _isAiThinking,
