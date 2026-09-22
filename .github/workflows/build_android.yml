@@ -44,6 +44,7 @@ jobs:
                   c = c.replace('<application', '    <uses-permission android:name=\"android.permission.CAMERA\" />\n    <uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-feature android:name=\"android.hardware.camera\" android:required=\"false\" />\n    <uses-feature android:name=\"android.hardware.camera.autofocus\" android:required=\"false\" />\n    <application')
               if 'APPLICATION_ID' not in c:
                   c = c.replace('<activity', '        <meta-data android:name=\"com.google.android.gms.ads.APPLICATION_ID\" android:value=\"ca-app-pub-3940256099942544~3347511713\"/>\n        <activity')
+              c = re.sub(r'android:label=\"[^\"]*\"', 'android:label=\"ChessSnap\"', c)
               with open(m, 'w') as f:
                   f.write(c)
 

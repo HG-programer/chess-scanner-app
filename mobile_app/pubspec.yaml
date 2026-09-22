@@ -1,5 +1,5 @@
 name: chess_scanner
-description: "AI Camera Chess Board Scanner & Stockfish Analysis Mobile App"
+description: "ChessSnap: AI Board Scanner & Stockfish Analysis Mobile App"
 publish_to: 'none'
 version: 1.0.0+1
 

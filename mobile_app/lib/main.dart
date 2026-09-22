@@ -28,7 +28,7 @@ class ChessScannerApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Chess Scanner: Camera FEN & AI',
+      title: 'ChessSnap: AI Board Scanner',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF121212),
@@ -989,7 +989,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('♟️ Chess Scanner Pro'),
+        title: const Text('📸 ChessSnap AI'),
         elevation: 0,
         actions: [
           IconButton(
