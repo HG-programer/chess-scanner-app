@@ -368,8 +368,16 @@ class ChessEngineService {
     });
   }
 
-  int _getPieceTypeValue(String char) {
-    switch (char.toLowerCase()) {
+  int _getPieceTypeValue(dynamic piece) {
+    if (piece == null) return 0;
+    String name;
+    if (piece is chess_logic.PieceType) {
+      name = piece.name;
+    } else {
+      name = piece.toString().toLowerCase();
+      if (name.contains('.')) name = name.split('.').last;
+    }
+    switch (name.toLowerCase()) {
       case 'p': return 1;
       case 'n': return 3;
       case 'b': return 3;
@@ -408,10 +416,13 @@ class ChessEngineService {
         final prom = m['promotion']?.toString() ?? 'q';
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
-          final score = _quiesce(chess, alpha, beta, qDepth - 1, false, isBlitz);
-          chess.undo();
-          if (score >= beta) return beta;
-          if (score > alpha) alpha = score;
+          try {
+            final score = _quiesce(chess, alpha, beta, qDepth - 1, false, isBlitz);
+            if (score >= beta) return beta;
+            if (score > alpha) alpha = score;
+          } finally {
+            chess.undo();
+          }
         }
       }
       return alpha;
@@ -432,10 +443,13 @@ class ChessEngineService {
         final prom = m['promotion']?.toString() ?? 'q';
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
-          final score = _quiesce(chess, alpha, beta, qDepth - 1, true, isBlitz);
-          chess.undo();
-          if (score <= alpha) return alpha;
-          if (score < beta) beta = score;
+          try {
+            final score = _quiesce(chess, alpha, beta, qDepth - 1, true, isBlitz);
+            if (score <= alpha) return alpha;
+            if (score < beta) beta = score;
+          } finally {
+            chess.undo();
+          }
         }
       }
       return beta;
@@ -467,10 +481,13 @@ class ChessEngineService {
         final prom = m['promotion']?.toString() ?? 'q';
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
-          final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, false, isBlitz);
-          chess.undo();
-          maxEval = math.max(maxEval, evaluation);
-          alpha = math.max(alpha, evaluation);
+          try {
+            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, false, isBlitz);
+            maxEval = math.max(maxEval, evaluation);
+            alpha = math.max(alpha, evaluation);
+          } finally {
+            chess.undo();
+          }
           if (beta <= alpha) break;
         }
       }
@@ -484,10 +501,13 @@ class ChessEngineService {
         final prom = m['promotion']?.toString() ?? 'q';
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
-          final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, true, isBlitz);
-          chess.undo();
-          minEval = math.min(minEval, evaluation);
-          beta = math.min(beta, evaluation);
+          try {
+            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, true, isBlitz);
+            minEval = math.min(minEval, evaluation);
+            beta = math.min(beta, evaluation);
+          } finally {
+            chess.undo();
+          }
           if (beta <= alpha) break;
         }
       }
@@ -605,10 +625,15 @@ class ChessEngineService {
         final prom = m['promotion']?.toString() ?? 'q';
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
-          final eval = _alphaBeta(chess, searchDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz);
-          chess.undo();
-          scoredMoves.add(_ScoredMove(m, eval));
+          try {
+            final eval = _alphaBeta(chess, searchDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz);
+            scoredMoves.add(_ScoredMove(m, eval));
+          } finally {
+            chess.undo();
+          }
         }
+        // Yield to event loop to keep UI thread fluid and prevent ANR
+        await Future.delayed(Duration.zero);
       }
 
       if (scoredMoves.isEmpty) {

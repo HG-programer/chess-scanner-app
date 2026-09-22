@@ -132,21 +132,25 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   /// Evaluates the position and calculates the next best move with Alpha-Beta & Cloud Engine
   Future<void> _calculateEngineEvaluation(String fen) async {
-    final result = await _engineService.analyzePosition(
-      fen,
-      engineId: _currentEngine.id,
-      maxDepth: _currentEngine.defaultDepth,
-    );
+    try {
+      final result = await _engineService.analyzePosition(
+        fen,
+        engineId: _currentEngine.id,
+        maxDepth: _currentEngine.defaultDepth,
+      );
 
-    if (!mounted) return;
-    setState(() {
-      _bestMove = result.bestMove;
-      _bestMoveSan = result.moveSan;
-      _evalPercent = result.evalPercent;
-      _scoreText = result.evalText;
-      _coachAdvice = result.coachAdvice;
-      _engineSearchDepth = result.depth;
-    });
+      if (!mounted) return;
+      setState(() {
+        _bestMove = result.bestMove;
+        _bestMoveSan = result.moveSan;
+        _evalPercent = result.evalPercent;
+        _scoreText = result.evalText;
+        _coachAdvice = result.coachAdvice;
+        _engineSearchDepth = result.depth;
+      });
+    } catch (e) {
+      debugPrint('[Engine] Evaluation calculation error: $e');
+    }
   }
 
   void _onMoveMade(String from, String to, String newFen) {
@@ -158,11 +162,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       _currentFen = newFen;
     });
 
-    _calculateEngineEvaluation(newFen);
-
-    // If Play vs AI is enabled, execute the engine's counter-move automatically
+    // If Play vs AI is enabled, the bot will compute and play its counter-move.
+    // Avoid running duplicate concurrent evaluations that contend for CPU on the same thread.
     if (_isPlayVsAi) {
       _triggerAiCounterMove(newFen);
+    } else {
+      _calculateEngineEvaluation(newFen);
     }
   }
 
@@ -172,17 +177,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     try {
       final chess = chess_logic.Chess.fromFEN(fenAfterPlayerMove);
       if (chess.game_over) {
-        setState(() => _isAiThinking = false);
+        if (mounted) setState(() => _isAiThinking = false);
         return;
       }
 
       // Timing tuned to engine personality
-      int delayMs = 500;
+      int delayMs = 350;
       if (_currentEngine.id == 'blitz') delayMs = 150;
-      if (_currentEngine.id == 'stockfish19') delayMs = 650;
-      if (_currentEngine.id == 'cloud') delayMs = 350;
+      if (_currentEngine.id == 'stockfish19') delayMs = 500;
+      if (_currentEngine.id == 'cloud') delayMs = 300;
 
       await Future.delayed(Duration(milliseconds: delayMs));
+      if (!mounted) return;
 
       final result = await _engineService.analyzePosition(
         fenAfterPlayerMove,
@@ -232,12 +238,20 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           if (executedAiMoveUci != null) {
             _lastMoveUci = executedAiMoveUci;
           }
+          _bestMove = result.bestMove;
+          _bestMoveSan = result.moveSan;
+          _evalPercent = result.evalPercent;
+          _scoreText = result.evalText;
+          _coachAdvice = result.coachAdvice;
+          _engineSearchDepth = result.depth;
         });
 
         _calculateEngineEvaluation(chess.fen);
         return;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Engine] Bot counter-move error: $e');
+    }
 
     if (mounted) setState(() => _isAiThinking = false);
   }
@@ -376,14 +390,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       _lastMoveUci = null;
     });
 
-    _calculateEngineEvaluation(_currentFen);
-
     // Occasionally show interstitial ad on new game if not premium (with cooldown)
     AdService.instance.showInterstitialWithCooldown();
 
     // If user chose to play as Black from starting board, have AI play White's opening move!
     if (!playAsWhite && customFen == null && _isPlayVsAi) {
       _triggerAiCounterMove(_startFen);
+    } else {
+      _calculateEngineEvaluation(_currentFen);
     }
 
     _showNotice(

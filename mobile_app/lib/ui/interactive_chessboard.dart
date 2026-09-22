@@ -81,10 +81,11 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
 
   void _syncLastMove() {
     if (widget.lastMoveUci != null && widget.lastMoveUci!.length >= 4) {
-      setState(() {
-        _lastFrom = widget.lastMoveUci!.substring(0, 2);
-        _lastTo = widget.lastMoveUci!.substring(2, 4);
-      });
+      _lastFrom = widget.lastMoveUci!.substring(0, 2);
+      _lastTo = widget.lastMoveUci!.substring(2, 4);
+    } else {
+      _lastFrom = null;
+      _lastTo = null;
     }
   }
 
@@ -200,6 +201,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
   /// Execute move from [from] to [to]
   Future<void> _executeMove(String from, String to) async {
     if (widget.isAiThinking) return;
+    if (from.length < 2 || to.length < 2) return;
 
     // Check if this move is a pawn promotion
     final pieceChar = _chess.get(from)?.type.name.toLowerCase();
@@ -469,8 +471,10 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
             SizedBox(
               width: boardSize,
               height: boardSize,
-              child: Container(
-                decoration: BoxDecoration(
+              child: AbsorbPointer(
+                absorbing: widget.isAiThinking,
+                child: Container(
+                  decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                   boxShadow: [
                     BoxShadow(
@@ -601,6 +605,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                                         return Offset(liftSize / 2.0, liftSize / 2.0);
                                                       },
                                                       onDragStarted: () {
+                                                        if (widget.isAiThinking) return;
                                                         HapticFeedback.selectionClick();
                                                         setState(() {
                                                           _selectedSquare = sq;
@@ -663,7 +668,8 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
+          ),
+          const SizedBox(height: 8),
 
             // 3. Quick Board Actions Bar (Flip, Undo, Reset)
             if (widget.onFlipBoard != null || widget.onUndoMove != null || widget.onResetBoard != null) ...[
