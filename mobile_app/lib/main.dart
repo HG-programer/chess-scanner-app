@@ -444,11 +444,22 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  '👑 Unlock All 4 Engines',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.amber),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    'assets/images/app_logo.png',
+                    width: 38,
+                    height: 38,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'ChessSnap Pro Pass',
+                    style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.amber),
+                  ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white54),
@@ -773,32 +784,53 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   Widget _buildCameraScanCard() {
     return Card(
       color: const Color(0xFF1E1E1E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: Padding(
-        padding: const EdgeInsets.all(14.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            const Icon(Icons.camera_alt, size: 32, color: Colors.amber),
-            const SizedBox(height: 6),
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.cyanAccent.withOpacity(0.4),
+                    blurRadius: 18,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Image.asset(
+                  'assets/images/app_logo.png',
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             const Text(
               'Scan Physical Chess Board',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             const Text(
-              'Point camera at physical boards, screens, or test sample diagrams.',
+              'Point camera at 3D physical boards, screens, or tactical diagrams.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 11),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             ElevatedButton.icon(
               onPressed: _openCameraScanner,
-              icon: const Icon(Icons.photo_camera, size: 16),
-              label: const Text('Open Camera Scanner'),
+              icon: const Icon(Icons.photo_camera, size: 18),
+              label: const Text('Open Camera Scanner', style: TextStyle(fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.amber,
                 foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
@@ -989,7 +1021,25 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('📸 ChessSnap AI'),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/images/app_logo.png',
+                width: 30,
+                height: 30,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'ChessSnap AI',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
+        ),
         elevation: 0,
         actions: [
           IconButton(

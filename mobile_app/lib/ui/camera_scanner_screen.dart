@@ -110,7 +110,16 @@ class _CameraScannerScreenState extends State<CameraScannerScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF101010),
       appBar: AppBar(
-        title: const Text('📷 Camera Chess Scanner'),
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.asset('assets/images/app_logo.png', width: 26, height: 26, fit: BoxFit.cover),
+            ),
+            const SizedBox(width: 10),
+            const Text('Camera Board Scanner'),
+          ],
+        ),
         backgroundColor: const Color(0xFF181818),
         elevation: 0,
       ),
@@ -125,15 +134,30 @@ class _CameraScannerScreenState extends State<CameraScannerScreen> {
           // 2. Simulated CV Processing Overlay
           if (_isScanning)
             Container(
-              color: Colors.black.withOpacity(0.85),
+              color: Colors.black.withOpacity(0.88),
               child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const CircularProgressIndicator(color: Colors.amber, strokeWidth: 3),
+                      Container(
+                        width: 76,
+                        height: 76,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(color: Colors.cyanAccent.withOpacity(0.5), blurRadius: 20),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.asset('assets/images/app_logo.png', fit: BoxFit.cover),
+                        ),
+                      ),
                       const SizedBox(height: 20),
+                      const CircularProgressIndicator(color: Colors.cyanAccent, strokeWidth: 3),
+                      const SizedBox(height: 16),
                       Text(
                         _scanStatusText,
                         textAlign: TextAlign.center,
@@ -284,17 +308,20 @@ class _CameraScannerScreenState extends State<CameraScannerScreen> {
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.amber.withOpacity(0.4)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.developer_board, color: Colors.amber, size: 28),
-                SizedBox(width: 12),
-                Expanded(
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset('assets/images/app_logo.png', width: 44, height: 44, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Emulator Mode (LDPlayer / PC)', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 14)),
+                      Text('ChessSnap Scanner Engine', style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 14)),
                       SizedBox(height: 2),
-                      Text('Physical camera is inactive. You can test the scanning pipeline instantly with real grandmaster board positions below:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      Text('Camera inactive in emulator. Test the real CV scanning & FEN builder pipeline with master presets below:', style: TextStyle(color: Colors.white70, fontSize: 12)),
                     ],
                   ),
                 ),

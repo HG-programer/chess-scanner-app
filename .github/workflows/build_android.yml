@@ -34,6 +34,7 @@ jobs:
         run: |
           rm -rf android
           flutter create --org com.chessscanner --project-name chess_scanner --platforms android .
+          cp -rf assets/icons/mipmap-* android/app/src/main/res/
           python3 -c "
           import glob, re
           # Update AndroidManifest.xml
