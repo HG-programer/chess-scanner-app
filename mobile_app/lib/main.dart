@@ -67,6 +67,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   double _evalPercent = 50.0;
   String _scoreText = "0.00";
   String _bestMove = "e2e4";
+  String _bestMoveSan = "e4";
+  int _engineSearchDepth = 4;
   int _moveCount = 0;
   bool _isWhiteOrientation = true;
   bool _isPlayVsAi = true;
@@ -110,9 +112,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     if (!mounted) return;
     setState(() {
       _bestMove = result.bestMove;
+      _bestMoveSan = result.moveSan;
       _evalPercent = result.evalPercent;
       _scoreText = result.evalText;
       _coachAdvice = result.coachAdvice;
+      _engineSearchDepth = result.depth;
     });
   }
 
@@ -142,7 +146,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         return;
       }
 
-      await Future.delayed(const Duration(milliseconds: 550));
+      // Timing tuned to engine personality
+      int delayMs = 500;
+      if (_currentEngine.id == 'blitz') delayMs = 150;
+      if (_currentEngine.id == 'stockfish19') delayMs = 650;
+      if (_currentEngine.id == 'cloud') delayMs = 350;
+
+      await Future.delayed(Duration(milliseconds: delayMs));
 
       final result = await _engineService.analyzePosition(
         fenAfterPlayerMove,
@@ -151,24 +161,39 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       );
 
       final aiMoveUci = result.bestMove;
-      if (aiMoveUci.length >= 4) {
+      bool moved = false;
+
+      if (aiMoveUci.length >= 4 && aiMoveUci != 'mate' && aiMoveUci != 'none') {
         final from = aiMoveUci.substring(0, 2);
         final to = aiMoveUci.substring(2, 4);
         final promo = aiMoveUci.length >= 5 ? aiMoveUci[4] : 'q';
+        moved = chess.move({'from': from, 'to': to, 'promotion': promo});
+      }
 
-        final moved = chess.move({'from': from, 'to': to, 'promotion': promo});
-        if (moved) {
-          if (!mounted) return;
-          setState(() {
-            _fenHistory.add(_currentFen);
-            _currentFen = chess.fen;
-            _isAiThinking = false;
-            _moveCount++;
+      // Dynamic fallback: If calculated move failed to execute, execute first legal move
+      if (!moved) {
+        final legalMoves = chess.moves({'verbose': true});
+        if (legalMoves.isNotEmpty) {
+          final lm = legalMoves.first as Map;
+          moved = chess.move({
+            'from': lm['from'].toString(),
+            'to': lm['to'].toString(),
+            'promotion': lm['promotion']?.toString() ?? 'q',
           });
-
-          _calculateEngineEvaluation(chess.fen);
-          return;
         }
+      }
+
+      if (moved) {
+        if (!mounted) return;
+        setState(() {
+          _fenHistory.add(_currentFen);
+          _currentFen = chess.fen;
+          _isAiThinking = false;
+          _moveCount++;
+        });
+
+        _calculateEngineEvaluation(chess.fen);
+        return;
       }
     } catch (_) {}
 
@@ -593,23 +618,93 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  Widget _buildCoachAdviceCard(String coachAdvice) {
+  Widget _buildCoachAdviceCard(String advice) {
+    Color borderColor;
+    Color bgColor;
+    Color textColor;
+    String engineTitle;
+
+    switch (_currentEngine.id) {
+      case 'stockfish19':
+        borderColor = Colors.amber.withOpacity(0.4);
+        bgColor = Colors.amber.withOpacity(0.12);
+        textColor = Colors.amberAccent;
+        engineTitle = '🏆 Stockfish 19 NNUE Telemetry';
+        break;
+      case 'blitz':
+        borderColor = Colors.orangeAccent.withOpacity(0.4);
+        bgColor = Colors.orangeAccent.withOpacity(0.12);
+        textColor = Colors.orangeAccent;
+        engineTitle = '⚡ Stockfish Blitz Fast Tactical Analysis';
+        break;
+      case 'cloud':
+        borderColor = Colors.tealAccent.withOpacity(0.4);
+        bgColor = Colors.tealAccent.withOpacity(0.12);
+        textColor = Colors.tealAccent;
+        engineTitle = '☁️ Lichess Cloud Master Database';
+        break;
+      default: // coach
+        borderColor = Colors.blueAccent.withOpacity(0.3);
+        bgColor = Colors.blueAccent.withOpacity(0.12);
+        textColor = Colors.lightBlueAccent;
+        engineTitle = '🎓 Coach Tactical Insight';
+        break;
+    }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       margin: const EdgeInsets.only(top: 8),
       decoration: BoxDecoration(
-        color: Colors.blueAccent.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
       ),
-      child: Text(
-        coachAdvice,
-        style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                engineTitle,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black26,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '${_currentEngine.elo} ELO',
+                  style: TextStyle(color: textColor, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            advice,
+            style: const TextStyle(color: Colors.white, fontSize: 12, height: 1.3),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildBestMoveCard() {
+    final isGameOver = _bestMove == 'mate' || _bestMove == 'none';
+    final moveDisplay = isGameOver
+        ? (_scoreText.contains('1-0') || _scoreText.contains('0-1') ? '🏆 CHECKMATE' : '½-½ DRAW')
+        : (_bestMoveSan != _bestMove
+            ? '${_bestMoveSan.toUpperCase()}  (${_bestMove.toUpperCase()})'
+            : _bestMove.toUpperCase());
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
@@ -620,16 +715,31 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('BEST MOVE (AI)', style: TextStyle(color: Colors.white54, fontSize: 11)),
-              Text(
-                _bestMove.toUpperCase(),
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.greenAccent),
-              ),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('BEST MOVE (${_currentEngine.name.toUpperCase()})', style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 6),
+                    Text('• Depth $_engineSearchDepth', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  moveDisplay,
+                  style: TextStyle(
+                    fontSize: isGameOver ? 16 : 18,
+                    fontWeight: FontWeight.bold,
+                    color: isGameOver ? Colors.amberAccent : Colors.greenAccent,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
           Row(
             children: [
               ElevatedButton.icon(
