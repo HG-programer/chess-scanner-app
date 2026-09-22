@@ -86,7 +86,7 @@ with open("android/app/key.properties", "w") as f:
     f.write(props_content)
 
 # 2. Configure AndroidManifest.xml
-admob_app_id = os.environ.get("ADMOB_APP_ID", "").strip() or "ca-app-pub-3940256099942544~3347511713"
+admob_app_id = os.environ.get("ADMOB_APP_ID", "").strip() or "ca-app-pub-2358882594896890~7046444944"
 
 for m in glob.glob("android/app/src/main/AndroidManifest.xml"):
     with open(m, "r", encoding="utf-8") as f:

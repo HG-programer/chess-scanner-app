@@ -14,10 +14,10 @@ class AdMobConfig {
   static const String testInterstitialId = 'ca-app-pub-3940256099942544/1033173712';
 
   // Production IDs: Place your real AdMob IDs here when ready for Google Play release
-  static const String productionAppId = '';
-  static const String productionBannerId = '';
-  static const String productionRewardedId = '';
-  static const String productionInterstitialId = '';
+  static const String productionAppId = 'ca-app-pub-2358882594896890~7046444944';
+  static const String productionBannerId = 'ca-app-pub-2358882594896890/9274345009';
+  static const String productionRewardedId = 'ca-app-pub-2358882594896890/8079401576';
+  static const String productionInterstitialId = 'ca-app-pub-2358882594896890/5110546744';
 
   /// Returns true if production AdMob IDs have been supplied
   static bool get isProductionConfigured =>
