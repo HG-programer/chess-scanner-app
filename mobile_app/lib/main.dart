@@ -475,20 +475,25 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           _showNotice('Switched to ${newEngine.name} (${newEngine.elo} ELO)', icon: Icons.swap_horiz);
         },
         onOpenPaywall: _openPaywallSheet,
-        onWatchAdForTempUnlock: _watchAdForProPass,
+        onWatchAdForTempUnlock: (intendedEngine) => _watchAdForProPass(intendedEngine: intendedEngine),
       ),
     );
   }
 
-  void _watchAdForProPass() {
+  void _watchAdForProPass({EngineProfile? intendedEngine}) {
     AdService.instance.showRewardedAd(
       context: context,
       onRewardEarned: () {
         if (!mounted) return;
         setState(() {
           _isPremium = true;
+          if (intendedEngine != null) {
+            _currentEngine = intendedEngine;
+          }
         });
-        _showNotice('🎬 Reward Earned! 30-Minute Pro Pass activated.', bg: Colors.amber.shade900, icon: Icons.verified);
+        _calculateEngineEvaluation(_currentFen);
+        final unlockedName = intendedEngine != null ? ' Switched to ${intendedEngine.name}.' : '';
+        _showNotice('🎬 Reward Earned! 30-Minute Pro Pass activated.$unlockedName', bg: Colors.amber.shade900, icon: Icons.verified);
       },
     );
   }

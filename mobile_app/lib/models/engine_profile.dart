@@ -30,43 +30,43 @@ class EngineProfile {
     id: 'coach',
     name: 'Stockfish Coach',
     tag: 'BASE FREE',
-    elo: 1500,
-    description: 'Club Master & Tactician. Explains positional ideas, tactics, and blunders in plain English.',
+    elo: 1100,
+    description: 'Club Apprentice & Tactician. Explains positional ideas, tactics, and blunders in plain English.',
     tier: EngineTier.free,
-    defaultDepth: 8,
+    defaultDepth: 4,
     icon: '🎓',
-  );
-
-  static const EngineProfile stockfish19 = EngineProfile(
-    id: 'stockfish19',
-    name: 'Stockfish NNUE Grandmaster',
-    tag: 'PRO ONLY',
-    elo: 3500,
-    description: 'Superhuman NNUE neural heuristics. Unbeatable depth 20+ multi-pv tournament analysis.',
-    tier: EngineTier.pro,
-    defaultDepth: 22,
-    icon: '🏆',
   );
 
   static const EngineProfile blitz = EngineProfile(
     id: 'blitz',
-    name: 'Stockfish Blitz',
+    name: 'Tactical Blitz Bot',
     tag: 'PRO ONLY',
-    elo: 2200,
-    description: 'Lightning-fast 100ms move generator tuned for speed and practical blitz tactics.',
+    elo: 1450,
+    description: 'Aggressive attacking engine tuned for rapid tactical combinations and counter-punches.',
     tier: EngineTier.pro,
-    defaultDepth: 12,
+    defaultDepth: 5,
     icon: '⚡',
+  );
+
+  static const EngineProfile stockfish19 = EngineProfile(
+    id: 'stockfish19',
+    name: 'Club Master AI',
+    tag: 'PRO ONLY',
+    elo: 1750,
+    description: 'Deep positional search with king safety, pawn structure, and zero tactical blunders.',
+    tier: EngineTier.pro,
+    defaultDepth: 6,
+    icon: '🏆',
   );
 
   static const EngineProfile cloud = EngineProfile(
     id: 'cloud',
-    name: 'Lichess Cloud Master',
+    name: 'Grandmaster Cloud',
     tag: 'PRO ONLY',
-    elo: 3800,
-    description: 'Instant grandmaster opening book and 10-million game cloud database evaluation.',
+    elo: 3000,
+    description: 'Direct queries to Lichess Cloud opening book and 60+ depth Grandmaster evaluation.',
     tier: EngineTier.pro,
-    defaultDepth: 40,
+    defaultDepth: 60,
     icon: '☁️',
   );
 

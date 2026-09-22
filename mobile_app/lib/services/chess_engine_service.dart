@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:chess/chess.dart' as chess_logic;
 
@@ -56,6 +57,17 @@ class _SearchState {
   _SearchState(this.deadlineMs);
 }
 
+class _SearchMessage {
+  final String fen;
+  final String engineId;
+  final int maxDepth;
+  const _SearchMessage(this.fen, this.engineId, this.maxDepth);
+}
+
+EngineAnalysisResult _runBackgroundSearch(_SearchMessage msg) {
+  return ChessEngineService.searchPositionCore(msg.fen, msg.engineId, msg.maxDepth);
+}
+
 /// Robust Chess Engine Service featuring:
 /// - 4 Distinct AI Engines: Stockfish Coach (1500 ELO), Stockfish 19 NNUE (3500+ ELO),
 ///   Stockfish Blitz (2200 ELO), and Lichess Cloud Master (3800 ELO).
@@ -70,7 +82,7 @@ class ChessEngineService {
   factory ChessEngineService() => _instance;
   ChessEngineService._internal();
 
-  final math.Random _rng = math.Random();
+  static final math.Random _rng = math.Random();
 
   // Grandmaster Opening Presets for diverse home screen matches
   static const List<OpeningPreset> openingPresets = [
@@ -260,7 +272,7 @@ class ChessEngineService {
   };
 
   /// Evaluates static board position (in centipawns from White's perspective)
-  int _evaluateBoard(chess_logic.Chess chess, {bool isBlitz = false}) {
+  static int _evaluateBoard(chess_logic.Chess chess, {bool isBlitz = false, bool isMaster = false}) {
     if (chess.in_checkmate) {
       return chess.turn == chess_logic.Color.WHITE ? -99999 : 99999;
     }
@@ -272,6 +284,13 @@ class ChessEngineService {
     int blackBishops = 0;
     int whiteNonPawnMaterial = 0;
     int blackNonPawnMaterial = 0;
+
+    final List<int> whitePawnCountPerFile = List.filled(8, 0);
+    final List<int> blackPawnCountPerFile = List.filled(8, 0);
+    final List<int> whiteRookCols = [];
+    final List<int> blackRookCols = [];
+    int whiteKingR = 7, whiteKingC = 4;
+    int blackKingR = 0, blackKingC = 4;
 
     for (int r = 0; r < 8; r++) {
       for (int c = 0; c < 8; c++) {
@@ -289,6 +308,11 @@ class ChessEngineService {
         if (typeName == 'p') {
           material = _pawnVal;
           positional = _pawnTable[squareIndex];
+          if (isWhite) {
+            whitePawnCountPerFile[c]++;
+          } else {
+            blackPawnCountPerFile[c]++;
+          }
         } else if (typeName == 'n') {
           material = _knightVal;
           positional = _knightTable[squareIndex];
@@ -306,10 +330,15 @@ class ChessEngineService {
         } else if (typeName == 'r') {
           material = _rookVal;
           positional = _rookTable[squareIndex];
-          // Bonus for rook on the 7th rank
           if (isWhite && r == 1) positional += 25;
           if (!isWhite && r == 6) positional += 25;
-          if (isWhite) whiteNonPawnMaterial += _rookVal; else blackNonPawnMaterial += _rookVal;
+          if (isWhite) {
+            whiteNonPawnMaterial += _rookVal;
+            whiteRookCols.add(c);
+          } else {
+            blackNonPawnMaterial += _rookVal;
+            blackRookCols.add(c);
+          }
         } else if (typeName == 'q') {
           material = _queenVal;
           positional = _queenTable[squareIndex];
@@ -320,6 +349,18 @@ class ChessEngineService {
           positional = isEndgame
               ? _kingTableEndgame[squareIndex]
               : _kingTableMiddlegame[squareIndex];
+          if (isWhite) {
+            whiteKingR = r;
+            whiteKingC = c;
+          } else {
+            blackKingR = r;
+            blackKingC = c;
+          }
+        }
+
+        // Center control bonus for e4, d4, e5, d5
+        if ((r == 3 || r == 4) && (c == 3 || c == 4)) {
+          positional += 15;
         }
 
         final totalPieceVal = material + positional;
@@ -335,6 +376,61 @@ class ChessEngineService {
     if (whiteBishops >= 2) whiteScore += 30;
     if (blackBishops >= 2) blackScore += 30;
 
+    // Advanced positional heuristics for higher tier engines
+    if (isMaster || isBlitz) {
+      // 1. Rooks on open and semi-open files
+      for (final c in whiteRookCols) {
+        if (whitePawnCountPerFile[c] == 0) {
+          if (blackPawnCountPerFile[c] == 0) {
+            whiteScore += 25; // Open file
+          } else {
+            whiteScore += 12; // Semi-open file
+          }
+        }
+      }
+      for (final c in blackRookCols) {
+        if (blackPawnCountPerFile[c] == 0) {
+          if (whitePawnCountPerFile[c] == 0) {
+            blackScore += 25; // Open file
+          } else {
+            blackScore += 12; // Semi-open file
+          }
+        }
+      }
+
+      // 2. King Safety & Pawn Shield (when not in endgame)
+      final bool whiteInEndgame = blackNonPawnMaterial <= 1300;
+      final bool blackInEndgame = whiteNonPawnMaterial <= 1300;
+
+      if (!whiteInEndgame) {
+        // Kingside castled White King (g1/h1)
+        if (whiteKingR == 7 && whiteKingC >= 6) {
+          if (whitePawnCountPerFile[5] == 0) whiteScore -= 20; // f-file open
+          if (whitePawnCountPerFile[6] == 0) whiteScore -= 30; // g-file open
+          if (whitePawnCountPerFile[7] == 0) whiteScore -= 15; // h-file open
+        } else if (whiteKingR == 7 && whiteKingC <= 2) {
+          // Queenside castled White King (b1/c1)
+          if (whitePawnCountPerFile[0] == 0) whiteScore -= 15;
+          if (whitePawnCountPerFile[1] == 0) whiteScore -= 25;
+          if (whitePawnCountPerFile[2] == 0) whiteScore -= 20;
+        }
+      }
+
+      if (!blackInEndgame) {
+        // Kingside castled Black King (g8/h8)
+        if (blackKingR == 0 && blackKingC >= 6) {
+          if (blackPawnCountPerFile[5] == 0) blackScore -= 20;
+          if (blackPawnCountPerFile[6] == 0) blackScore -= 30;
+          if (blackPawnCountPerFile[7] == 0) blackScore -= 15;
+        } else if (blackKingR == 0 && blackKingC <= 2) {
+          // Queenside castled Black King (b8/c8)
+          if (blackPawnCountPerFile[0] == 0) blackScore -= 15;
+          if (blackPawnCountPerFile[1] == 0) blackScore -= 25;
+          if (blackPawnCountPerFile[2] == 0) blackScore -= 20;
+        }
+      }
+    }
+
     // Blitz tactical bonus: reward active checks and pressure
     if (isBlitz && chess.in_check) {
       if (chess.turn == chess_logic.Color.WHITE) {
@@ -349,7 +445,7 @@ class ChessEngineService {
 
   /// Sorts moves with MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
   /// and checks to maximize alpha-beta cutoff efficiency.
-  void _sortMoves(List moves) {
+  static void _sortMoves(List moves) {
     moves.sort((a, b) {
       if (a is! Map || b is! Map) return 0;
       int scoreA = 0;
@@ -375,7 +471,7 @@ class ChessEngineService {
     });
   }
 
-  int _getPieceTypeValue(dynamic piece) {
+  static int _getPieceTypeValue(dynamic piece) {
     if (piece == null) return 0;
     String name;
     if (piece is chess_logic.PieceType) {
@@ -397,20 +493,20 @@ class ChessEngineService {
 
   /// Quiescence Search: Evaluates tactical captures beyond nominal search depth.
   /// Eliminates the Horizon Effect so the engine never blunders queens or pieces to recaptures.
-  int _quiesce(chess_logic.Chess chess, int alpha, int beta, int qDepth, bool isMaximizing, bool isBlitz, _SearchState state) {
+  static int _quiesce(chess_logic.Chess chess, int alpha, int beta, int qDepth, bool isMaximizing, bool isBlitz, bool isMaster, _SearchState state) {
     state.nodes++;
     if (state.nodes % 64 == 0 && DateTime.now().millisecondsSinceEpoch > state.deadlineMs) {
       state.aborted = true;
-      return _evaluateBoard(chess, isBlitz: isBlitz);
+      return _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
     }
-    if (state.aborted) return _evaluateBoard(chess, isBlitz: isBlitz);
+    if (state.aborted) return _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
 
     if (chess.in_checkmate) {
       return chess.turn == chess_logic.Color.WHITE ? -99999 : 99999;
     }
     if (chess.in_draw) return 0;
 
-    final standPat = _evaluateBoard(chess, isBlitz: isBlitz);
+    final standPat = _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
     if (qDepth <= 0) return standPat;
 
     if (isMaximizing) {
@@ -431,7 +527,7 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final score = _quiesce(chess, alpha, beta, qDepth - 1, false, isBlitz, state);
+            final score = _quiesce(chess, alpha, beta, qDepth - 1, false, isBlitz, isMaster, state);
             if (state.aborted) return score;
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
@@ -459,7 +555,7 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final score = _quiesce(chess, alpha, beta, qDepth - 1, true, isBlitz, state);
+            final score = _quiesce(chess, alpha, beta, qDepth - 1, true, isBlitz, isMaster, state);
             if (state.aborted) return score;
             if (score <= alpha) return alpha;
             if (score < beta) beta = score;
@@ -473,13 +569,13 @@ class ChessEngineService {
   }
 
   /// Minimax with Alpha-Beta pruning + Quiescence search with hard time deadline
-  int _alphaBeta(chess_logic.Chess chess, int depth, int alpha, int beta, bool isMaximizing, bool isBlitz, _SearchState state) {
+  static int _alphaBeta(chess_logic.Chess chess, int depth, int alpha, int beta, bool isMaximizing, bool isBlitz, bool isMaster, _SearchState state) {
     state.nodes++;
     if (state.nodes % 64 == 0 && DateTime.now().millisecondsSinceEpoch > state.deadlineMs) {
       state.aborted = true;
-      return _evaluateBoard(chess, isBlitz: isBlitz);
+      return _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
     }
-    if (state.aborted) return _evaluateBoard(chess, isBlitz: isBlitz);
+    if (state.aborted) return _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
 
     if (chess.in_checkmate) {
       return chess.turn == chess_logic.Color.WHITE ? -99999 : 99999;
@@ -487,11 +583,12 @@ class ChessEngineService {
     if (chess.in_draw) return 0;
 
     if (depth <= 0) {
-      return _quiesce(chess, alpha, beta, 2, isMaximizing, isBlitz, state);
+      final qLimit = isMaster ? 3 : 2;
+      return _quiesce(chess, alpha, beta, qLimit, isMaximizing, isBlitz, isMaster, state);
     }
 
     final moves = chess.moves({'verbose': true});
-    if (moves.isEmpty) return _evaluateBoard(chess, isBlitz: isBlitz);
+    if (moves.isEmpty) return _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
 
     _sortMoves(moves);
 
@@ -505,7 +602,7 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, false, isBlitz, state);
+            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, false, isBlitz, isMaster, state);
             if (state.aborted) return evaluation;
             maxEval = math.max(maxEval, evaluation);
             alpha = math.max(alpha, evaluation);
@@ -526,7 +623,7 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, true, isBlitz, state);
+            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, true, isBlitz, isMaster, state);
             if (state.aborted) return evaluation;
             minEval = math.min(minEval, evaluation);
             beta = math.min(beta, evaluation);
@@ -541,7 +638,7 @@ class ChessEngineService {
   }
 
   /// Checks if the current position has a book opening move for variety
-  String? _getBookMove(String fen) {
+  static String? _getBookMove(String fen) {
     final parts = fen.split(' ');
     if (parts.length >= 2) {
       final key = '${parts[0]} ${parts[1]}';
@@ -553,21 +650,12 @@ class ChessEngineService {
     return null;
   }
 
-  /// Calculates the best move and evaluation with Opening Book, Quiescence Search,
-  /// and distinct engine behaviors.
-  Future<EngineAnalysisResult> analyzePosition(
-    String fen, {
-    String engineId = 'coach',
-    int maxDepth = 4,
-  }) async {
-    // 1. If engine is Lichess Cloud, query Lichess Cloud API with reliable headers
-    if (engineId == 'cloud') {
-      try {
-        final cloudRes = await _fetchLichessCloud(fen);
-        if (cloudRes != null) return cloudRes;
-      } catch (_) {}
-    }
-
+  /// Synchronous search core executed inside the dedicated background Isolate
+  static EngineAnalysisResult searchPositionCore(
+    String fen,
+    String engineId,
+    int maxDepth,
+  ) {
     try {
       final chess = chess_logic.Chess.fromFEN(fen);
       if (chess.in_checkmate) {
@@ -596,8 +684,9 @@ class ChessEngineService {
 
       final isWhiteTurn = chess.turn == chess_logic.Color.WHITE;
       final isBlitz = engineId == 'blitz';
+      final isMaster = engineId == 'stockfish19' || engineId == 'cloud';
 
-      // 2. Check Grandmaster Opening Book for rich opening variety
+      // 1. Check Grandmaster Opening Book for rich opening variety
       final bookUci = _getBookMove(fen);
       if (bookUci != null) {
         Map? matchingBookMove;
@@ -608,17 +697,17 @@ class ChessEngineService {
           }
         }
         if (matchingBookMove != null) {
-          final evalVal = _evaluateBoard(chess, isBlitz: isBlitz);
+          final evalVal = _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster);
           final double scorePawns = evalVal / 100.0;
           final bookSan = matchingBookMove['san']?.toString() ?? bookUci;
 
           String advice;
           if (engineId == 'stockfish19') {
-            advice = "🏆 Stockfish NNUE: Book move $bookSan — Grandmaster opening line with optimal win-rate.";
+            advice = "🏆 Club Master: Book move $bookSan — Grandmaster opening line with optimal development.";
           } else if (engineId == 'blitz') {
-            advice = "⚡ Stockfish Blitz: Book move $bookSan! Rapid development accelerating king-side attack.";
+            advice = "⚡ Tactical Blitz: Book move $bookSan! Rapid development accelerating king-side attack.";
           } else if (engineId == 'cloud') {
-            advice = "☁️ Lichess Cloud Book: $bookSan — High-frequency grandmaster opening theory.";
+            advice = "☁️ Grandmaster Cloud: $bookSan — High-frequency grandmaster opening theory.";
           } else {
             advice = "🎓 Coach Advice: Classical opening move $bookSan. Develops active pieces and commands the center.";
           }
@@ -635,21 +724,21 @@ class ChessEngineService {
         }
       }
 
-      // 3. Iterative Deepening Minimax Search with Quiescence & Strict Time Budget
+      // 2. Iterative Deepening Minimax Search with Quiescence & Strict Time Budget
       int timeLimitMs = 350;
       int maxTargetDepth = 4;
       if (engineId == 'blitz') {
-        timeLimitMs = 200;
-        maxTargetDepth = 3;
+        timeLimitMs = 600;
+        maxTargetDepth = 5;
       } else if (engineId == 'coach') {
         timeLimitMs = 350;
         maxTargetDepth = 4;
       } else if (engineId == 'cloud') {
-        timeLimitMs = 450;
-        maxTargetDepth = 4;
+        timeLimitMs = 1200;
+        maxTargetDepth = 6;
       } else if (engineId == 'stockfish19') {
-        timeLimitMs = 600;
-        maxTargetDepth = 5;
+        timeLimitMs = 1200;
+        maxTargetDepth = 6;
       }
 
       final int deadlineMs = DateTime.now().millisecondsSinceEpoch + timeLimitMs;
@@ -671,7 +760,7 @@ class ChessEngineService {
 
           if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
             try {
-              final eval = _alphaBeta(chess, currentDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz, state);
+              final eval = _alphaBeta(chess, currentDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz, isMaster, state);
               levelScoredMoves.add(_ScoredMove(m, eval));
             } finally {
               chess.undo();
@@ -690,30 +779,26 @@ class ChessEngineService {
         if (state.aborted || DateTime.now().millisecondsSinceEpoch >= deadlineMs) {
           break;
         }
-
-        // Cooperative yield between iterative deepening levels
-        await Future.delayed(Duration.zero);
       }
 
       if (bestScoredMoves.isEmpty) {
-        bestScoredMoves.add(_ScoredMove(legalMoves.first as Map, _evaluateBoard(chess, isBlitz: isBlitz)));
+        bestScoredMoves.add(_ScoredMove(legalMoves.first as Map, _evaluateBoard(chess, isBlitz: isBlitz, isMaster: isMaster)));
       }
 
       final int bestScore = bestScoredMoves.first.score;
 
-      // Candidate selection:
-      // Stockfish 19 uses exact top score (strict grandmaster precision).
-      // Coach and Blitz use slight randomized tie-breaking among moves within 18 centipawns for human variety.
       Map bestMoveObj;
       int bestVal;
 
-      if (engineId == 'stockfish19' || engineId == 'cloud') {
+      if (engineId == 'stockfish19' || engineId == 'blitz' || engineId == 'cloud') {
+        // High-level bots use strict best score (zero blunder tolerance)
         bestMoveObj = bestScoredMoves.first.move;
         bestVal = bestScoredMoves.first.score;
       } else {
+        // Coach has mild tie-breaking among moves within 10 centipawns for accessible play
         final topCandidates = bestScoredMoves.where((sm) {
           final diff = (sm.score - bestScore).abs();
-          return diff <= 18;
+          return diff <= 10;
         }).toList();
         final selected = topCandidates.isNotEmpty
             ? topCandidates[_rng.nextInt(topCandidates.length)]
@@ -732,9 +817,9 @@ class ChessEngineService {
 
       String evalText;
       if (bestVal >= 90000) {
-        evalText = "# Mate in 1";
+        evalText = "# Mate";
       } else if (bestVal <= -90000) {
-        evalText = "# Mate in 1";
+        evalText = "# Mate";
       } else {
         evalText = scorePawns >= 0
             ? '+${scorePawns.toStringAsFixed(2)}'
@@ -750,23 +835,22 @@ class ChessEngineService {
         evalPercent: evalPercent,
         evalText: evalText,
         coachAdvice: advice,
-        depth: reachedDepth + 2, // Nominal depth + Quiescence plies
+        depth: reachedDepth + (isMaster ? 3 : 2),
       );
     } catch (_) {
-      // Dynamic safe error recovery: Never return a hardcoded "e2e4"!
       try {
         final chess = chess_logic.Chess.fromFEN(fen);
         final legalMoves = chess.moves({'verbose': true});
         if (legalMoves.isNotEmpty) {
-          final first = legalMoves.first as Map;
-          final from = first['from']?.toString() ?? 'e2';
-          final to = first['to']?.toString() ?? 'e4';
-          final san = first['san']?.toString() ?? 'e4';
+          final fallbackMove = legalMoves.first as Map;
+          final f = fallbackMove['from'].toString();
+          final t = fallbackMove['to'].toString();
+          final s = fallbackMove['san']?.toString() ?? '$f$t';
           return EngineAnalysisResult(
-            bestMove: '$from$to',
-            moveSan: san,
+            bestMove: '$f$t',
+            moveSan: s,
             evalScore: 0.10,
-            evalPercent: 51.0,
+            evalPercent: 50.0,
             evalText: "+0.10",
             coachAdvice: "💡 Develop active pieces and safeguard your king position.",
           );
@@ -784,8 +868,41 @@ class ChessEngineService {
     }
   }
 
-  /// Generates specialized engine advice tailored to each engine's advertised identity
-  String _generateEngineAdvice(
+  /// Background search runner function for Isolate compute
+  static EngineAnalysisResult _runBackgroundSearch(_SearchMessage message) {
+    return searchPositionCore(message.fen, message.engineId, message.maxDepth);
+  }
+
+  /// Evaluates the position and calculates the next best move.
+  /// Automatically dispatches local minimax searches to a background Isolate
+  /// to ensure the main UI thread never drops frames or lags.
+  Future<EngineAnalysisResult> analyzePosition(
+    String fen, {
+    String engineId = 'coach',
+    int maxDepth = 4,
+  }) async {
+    // 1. If engine is Lichess Cloud, query Lichess Cloud API first
+    if (engineId == 'cloud') {
+      try {
+        final cloudRes = await _fetchLichessCloud(fen);
+        if (cloudRes != null) return cloudRes;
+      } catch (_) {}
+    }
+
+    // 2. Offload local search to background isolate so UI thread stays 100% fluid (60/120 FPS)
+    try {
+      return await compute(
+        _runBackgroundSearch,
+        _SearchMessage(fen, engineId, maxDepth),
+      );
+    } catch (_) {
+      // Graceful fallback to direct execution
+      return searchPositionCore(fen, engineId, maxDepth);
+    }
+  }
+
+  /// Generates specialized engine advice tailored to each engine's identity
+  static String _generateEngineAdvice(
     String engineId,
     Map moveObj,
     String san,
@@ -799,30 +916,30 @@ class ChessEngineService {
     final toSq = moveObj['to']?.toString() ?? '';
     final piece = moveObj['piece']?.toString() ?? '';
 
-    // Stockfish NNUE: Superhuman grandmaster calculation telemetry
+    // Club Master AI: Deep positional calculation
     if (engineId == 'stockfish19') {
       final advantageText = scorePawns >= 1.5
           ? 'Decisive advantage (+${scorePawns.toStringAsFixed(2)})'
           : (scorePawns <= -1.5
               ? 'Black counter-play (${scorePawns.toStringAsFixed(2)})'
               : 'Positional balance (${scorePawns >= 0 ? '+' : ''}${scorePawns.toStringAsFixed(2)})');
-      return "🏆 Stockfish NNUE [Depth ${depth + 3}+Q | $advantageText]: Best move $san. Highly structured piece coordination.";
+      return "🏆 Club Master [Depth ${depth + 3}+Q | $advantageText]: Best move $san. Structured piece coordination & king safety.";
     }
 
-    // Stockfish Blitz: Fast aggressive attack commentary
+    // Tactical Blitz Bot: Fast aggressive attack commentary
     if (engineId == 'blitz') {
       if (san.contains('+')) {
-        return "⚡ Stockfish Blitz [Fast Attack]: $san delivers check! Disrupts defensive harmony and king safety.";
+        return "⚡ Tactical Blitz [Check]: $san delivers check! Disrupts defensive harmony.";
       }
       if (captured != null) {
-        return "⚡ Stockfish Blitz [Tactical Strike]: Takes $toSq ($san). Accelerating initiative and open lines.";
+        return "⚡ Tactical Blitz [Tactical Strike]: Takes $toSq ($san). Accelerating tactical pressure.";
       }
-      return "⚡ Stockfish Blitz [Aggressive Play]: $san seizes forward squares to pressure the opponent's territory.";
+      return "⚡ Tactical Blitz [Aggressive Play]: $san seizes forward squares to pressure territory.";
     }
 
-    // Lichess Cloud Master (Fallback when not in cloud database)
+    // Grandmaster Cloud
     if (engineId == 'cloud') {
-      return "☁️ Lichess Cloud [Hybrid NNUE]: Calculated $san (${scorePawns >= 0 ? '+' : ''}${scorePawns.toStringAsFixed(2)}). Deep grandmaster calculation.";
+      return "☁️ Grandmaster Cloud: $san (${scorePawns >= 0 ? '+' : ''}${scorePawns.toStringAsFixed(2)}). Deep positional grandmaster line.";
     }
 
     // Stockfish Coach (Base Free): Pedagogical, human-readable coaching
@@ -860,7 +977,7 @@ class ChessEngineService {
     return "⚖️ Strategic Development: Developing pieces toward the center with coordinated pawn structure.";
   }
 
-  String _pieceName(String char) {
+  static String _pieceName(String char) {
     switch (char.toLowerCase()) {
       case 'p': return 'Pawn';
       case 'n': return 'Knight';

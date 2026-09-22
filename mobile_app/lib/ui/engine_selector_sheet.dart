@@ -6,7 +6,7 @@ class EngineSelectorSheet extends StatefulWidget {
   final bool isPremium;
   final Function(EngineProfile newEngine) onEngineSelected;
   final VoidCallback onOpenPaywall;
-  final VoidCallback onWatchAdForTempUnlock;
+  final Function(EngineProfile intendedEngine) onWatchAdForTempUnlock;
 
   const EngineSelectorSheet({
     Key? key,
@@ -74,9 +74,8 @@ class _EngineSelectorSheetState extends State<EngineSelectorSheet> {
               label: const Text('Watch Ad (30m Pass)', style: TextStyle(color: Colors.orangeAccent)),
               onPressed: () {
                 Navigator.pop(ctx);
-                widget.onWatchAdForTempUnlock();
-                widget.onEngineSelected(engine);
                 Navigator.pop(context);
+                widget.onWatchAdForTempUnlock(engine);
               },
             ),
             ElevatedButton.icon(
