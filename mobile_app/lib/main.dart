@@ -246,7 +246,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           _engineSearchDepth = result.depth;
         });
 
-        _calculateEngineEvaluation(chess.fen);
         return;
       }
     } catch (e) {
@@ -257,17 +256,28 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void _undoMove() {
-    if (_fenHistory.isNotEmpty) {
-      setState(() {
-        _currentFen = _fenHistory.removeLast();
-        _isAiThinking = false;
-        _lastMoveUci = null;
-        if (_moveCount > 0) _moveCount--;
-      });
-      _calculateEngineEvaluation(_currentFen);
-    } else {
+    if (_isAiThinking) return;
+
+    if (_fenHistory.isEmpty) {
       _showNotice('At the beginning of the game.', icon: Icons.info_outline);
+      return;
     }
+
+    setState(() {
+      if (_isPlayVsAi && _fenHistory.length >= 2) {
+        // In Play vs AI, rewind BOTH the bot's counter-move and the player's move
+        _fenHistory.removeLast(); // Bot's position
+        _currentFen = _fenHistory.removeLast(); // Position before player's move
+        if (_moveCount >= 2) _moveCount -= 2;
+      } else {
+        _currentFen = _fenHistory.removeLast();
+        if (_moveCount > 0) _moveCount--;
+      }
+      _lastMoveUci = null;
+      _isAiThinking = false;
+    });
+
+    _showNotice('⏪ Move taken back', icon: Icons.undo);
   }
 
   void _resetBoard() {
@@ -378,9 +388,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void _startNewMatch({required bool playAsWhite, String? customFen, String? presetName}) {
+    final startFen = customFen ?? _startFen;
+    chess_logic.Chess? checkChess;
+    try {
+      checkChess = chess_logic.Chess.fromFEN(startFen);
+    } catch (_) {}
+
     setState(() {
       _fenHistory.clear();
-      _currentFen = customFen ?? _startFen;
+      _currentFen = startFen;
       _moveCount = 0;
       _isWhiteOrientation = playAsWhite;
       _isAiThinking = false;
@@ -393,9 +409,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     // Occasionally show interstitial ad on new game if not premium (with cooldown)
     AdService.instance.showInterstitialWithCooldown();
 
-    // If user chose to play as Black from starting board, have AI play White's opening move!
-    if (!playAsWhite && customFen == null && _isPlayVsAi) {
-      _triggerAiCounterMove(_startFen);
+    // If user chose to play as Black and it is White's turn, have AI play White's opening move!
+    if (!playAsWhite && _isPlayVsAi && (checkChess?.turn == chess_logic.Color.WHITE)) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) _triggerAiCounterMove(startFen);
+      });
     } else {
       _calculateEngineEvaluation(_currentFen);
     }

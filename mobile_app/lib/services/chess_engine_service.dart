@@ -49,6 +49,13 @@ class _ScoredMove {
   _ScoredMove(this.move, this.score);
 }
 
+class _SearchState {
+  int nodes = 0;
+  final int deadlineMs;
+  bool aborted = false;
+  _SearchState(this.deadlineMs);
+}
+
 /// Robust Chess Engine Service featuring:
 /// - 4 Distinct AI Engines: Stockfish Coach (1500 ELO), Stockfish 19 NNUE (3500+ ELO),
 ///   Stockfish Blitz (2200 ELO), and Lichess Cloud Master (3800 ELO).
@@ -390,7 +397,14 @@ class ChessEngineService {
 
   /// Quiescence Search: Evaluates tactical captures beyond nominal search depth.
   /// Eliminates the Horizon Effect so the engine never blunders queens or pieces to recaptures.
-  int _quiesce(chess_logic.Chess chess, int alpha, int beta, int qDepth, bool isMaximizing, bool isBlitz) {
+  int _quiesce(chess_logic.Chess chess, int alpha, int beta, int qDepth, bool isMaximizing, bool isBlitz, _SearchState state) {
+    state.nodes++;
+    if (state.nodes % 64 == 0 && DateTime.now().millisecondsSinceEpoch > state.deadlineMs) {
+      state.aborted = true;
+      return _evaluateBoard(chess, isBlitz: isBlitz);
+    }
+    if (state.aborted) return _evaluateBoard(chess, isBlitz: isBlitz);
+
     if (chess.in_checkmate) {
       return chess.turn == chess_logic.Color.WHITE ? -99999 : 99999;
     }
@@ -417,7 +431,8 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final score = _quiesce(chess, alpha, beta, qDepth - 1, false, isBlitz);
+            final score = _quiesce(chess, alpha, beta, qDepth - 1, false, isBlitz, state);
+            if (state.aborted) return score;
             if (score >= beta) return beta;
             if (score > alpha) alpha = score;
           } finally {
@@ -444,7 +459,8 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final score = _quiesce(chess, alpha, beta, qDepth - 1, true, isBlitz);
+            final score = _quiesce(chess, alpha, beta, qDepth - 1, true, isBlitz, state);
+            if (state.aborted) return score;
             if (score <= alpha) return alpha;
             if (score < beta) beta = score;
           } finally {
@@ -456,15 +472,22 @@ class ChessEngineService {
     }
   }
 
-  /// Minimax with Alpha-Beta pruning + Quiescence search
-  int _alphaBeta(chess_logic.Chess chess, int depth, int alpha, int beta, bool isMaximizing, bool isBlitz) {
+  /// Minimax with Alpha-Beta pruning + Quiescence search with hard time deadline
+  int _alphaBeta(chess_logic.Chess chess, int depth, int alpha, int beta, bool isMaximizing, bool isBlitz, _SearchState state) {
+    state.nodes++;
+    if (state.nodes % 64 == 0 && DateTime.now().millisecondsSinceEpoch > state.deadlineMs) {
+      state.aborted = true;
+      return _evaluateBoard(chess, isBlitz: isBlitz);
+    }
+    if (state.aborted) return _evaluateBoard(chess, isBlitz: isBlitz);
+
     if (chess.in_checkmate) {
       return chess.turn == chess_logic.Color.WHITE ? -99999 : 99999;
     }
     if (chess.in_draw) return 0;
 
     if (depth <= 0) {
-      return _quiesce(chess, alpha, beta, 3, isMaximizing, isBlitz);
+      return _quiesce(chess, alpha, beta, 2, isMaximizing, isBlitz, state);
     }
 
     final moves = chess.moves({'verbose': true});
@@ -482,7 +505,8 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, false, isBlitz);
+            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, false, isBlitz, state);
+            if (state.aborted) return evaluation;
             maxEval = math.max(maxEval, evaluation);
             alpha = math.max(alpha, evaluation);
           } finally {
@@ -502,7 +526,8 @@ class ChessEngineService {
 
         if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
           try {
-            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, true, isBlitz);
+            final evaluation = _alphaBeta(chess, depth - 1, alpha, beta, true, isBlitz, state);
+            if (state.aborted) return evaluation;
             minEval = math.min(minEval, evaluation);
             beta = math.min(beta, evaluation);
           } finally {
@@ -610,40 +635,71 @@ class ChessEngineService {
         }
       }
 
-      // 3. Minimax Alpha-Beta Search across legal moves with Quiescence Search
-      int searchDepth = 3;
-      if (engineId == 'blitz') searchDepth = 3;
-      if (engineId == 'stockfish19' || engineId == 'cloud') searchDepth = 4;
+      // 3. Iterative Deepening Minimax Search with Quiescence & Strict Time Budget
+      int timeLimitMs = 350;
+      int maxTargetDepth = 4;
+      if (engineId == 'blitz') {
+        timeLimitMs = 200;
+        maxTargetDepth = 3;
+      } else if (engineId == 'coach') {
+        timeLimitMs = 350;
+        maxTargetDepth = 4;
+      } else if (engineId == 'cloud') {
+        timeLimitMs = 450;
+        maxTargetDepth = 4;
+      } else if (engineId == 'stockfish19') {
+        timeLimitMs = 600;
+        maxTargetDepth = 5;
+      }
 
-      _sortMoves(legalMoves);
-      final List<_ScoredMove> scoredMoves = [];
+      final int deadlineMs = DateTime.now().millisecondsSinceEpoch + timeLimitMs;
+      final state = _SearchState(deadlineMs);
 
-      for (final m in legalMoves) {
-        if (m is! Map) continue;
-        final from = m['from'].toString();
-        final to = m['to'].toString();
-        final prom = m['promotion']?.toString() ?? 'q';
+      List<_ScoredMove> bestScoredMoves = [];
+      int reachedDepth = 1;
 
-        if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
-          try {
-            final eval = _alphaBeta(chess, searchDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz);
-            scoredMoves.add(_ScoredMove(m, eval));
-          } finally {
-            chess.undo();
+      // Iterative Deepening: depth 1 to maxTargetDepth
+      for (int currentDepth = 1; currentDepth <= maxTargetDepth; currentDepth++) {
+        final List<_ScoredMove> levelScoredMoves = [];
+        _sortMoves(legalMoves);
+
+        for (final m in legalMoves) {
+          if (m is! Map) continue;
+          final from = m['from'].toString();
+          final to = m['to'].toString();
+          final prom = m['promotion']?.toString() ?? 'q';
+
+          if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
+            try {
+              final eval = _alphaBeta(chess, currentDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz, state);
+              levelScoredMoves.add(_ScoredMove(m, eval));
+            } finally {
+              chess.undo();
+            }
           }
+
+          if (state.aborted) break;
         }
-        // Yield to event loop to keep UI thread fluid and prevent ANR
+
+        if (!state.aborted && levelScoredMoves.isNotEmpty) {
+          levelScoredMoves.sort((a, b) => isWhiteTurn ? b.score.compareTo(a.score) : a.score.compareTo(b.score));
+          bestScoredMoves = List.from(levelScoredMoves);
+          reachedDepth = currentDepth;
+        }
+
+        if (state.aborted || DateTime.now().millisecondsSinceEpoch >= deadlineMs) {
+          break;
+        }
+
+        // Cooperative yield between iterative deepening levels
         await Future.delayed(Duration.zero);
       }
 
-      if (scoredMoves.isEmpty) {
-        scoredMoves.add(_ScoredMove(legalMoves.first as Map, _evaluateBoard(chess, isBlitz: isBlitz)));
+      if (bestScoredMoves.isEmpty) {
+        bestScoredMoves.add(_ScoredMove(legalMoves.first as Map, _evaluateBoard(chess, isBlitz: isBlitz)));
       }
 
-      // Sort scored moves
-      scoredMoves.sort((a, b) => isWhiteTurn ? b.score.compareTo(a.score) : a.score.compareTo(b.score));
-
-      final int bestScore = scoredMoves.first.score;
+      final int bestScore = bestScoredMoves.first.score;
 
       // Candidate selection:
       // Stockfish 19 uses exact top score (strict grandmaster precision).
@@ -652,14 +708,16 @@ class ChessEngineService {
       int bestVal;
 
       if (engineId == 'stockfish19' || engineId == 'cloud') {
-        bestMoveObj = scoredMoves.first.move;
-        bestVal = scoredMoves.first.score;
+        bestMoveObj = bestScoredMoves.first.move;
+        bestVal = bestScoredMoves.first.score;
       } else {
-        final topCandidates = scoredMoves.where((sm) {
+        final topCandidates = bestScoredMoves.where((sm) {
           final diff = (sm.score - bestScore).abs();
           return diff <= 18;
         }).toList();
-        final selected = topCandidates[_rng.nextInt(topCandidates.length)];
+        final selected = topCandidates.isNotEmpty
+            ? topCandidates[_rng.nextInt(topCandidates.length)]
+            : bestScoredMoves.first;
         bestMoveObj = selected.move;
         bestVal = selected.score;
       }
@@ -683,7 +741,7 @@ class ChessEngineService {
             : scorePawns.toStringAsFixed(2);
       }
 
-      final advice = _generateEngineAdvice(engineId, bestMoveObj, bestSan, chess, scorePawns, isWhiteTurn, searchDepth);
+      final advice = _generateEngineAdvice(engineId, bestMoveObj, bestSan, chess, scorePawns, isWhiteTurn, reachedDepth);
 
       return EngineAnalysisResult(
         bestMove: uciMove,
@@ -692,7 +750,7 @@ class ChessEngineService {
         evalPercent: evalPercent,
         evalText: evalText,
         coachAdvice: advice,
-        depth: searchDepth + 3, // Nominal depth + Quiescence plies
+        depth: reachedDepth + 2, // Nominal depth + Quiescence plies
       );
     } catch (_) {
       // Dynamic safe error recovery: Never return a hardcoded "e2e4"!

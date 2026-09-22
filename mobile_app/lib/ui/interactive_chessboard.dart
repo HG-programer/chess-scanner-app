@@ -97,28 +97,18 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     }
   }
 
-  /// Parses the 8x8 piece grid directly from FEN string for 100% reliability
-  List<List<String?>> _parseFenGrid(String fen) {
-    final grid = List.generate(8, (_) => List<String?>.filled(8, null));
-    final parts = fen.split(' ');
-    final rows = parts[0].split('/');
-
-    for (int r = 0; r < 8 && r < rows.length; r++) {
-      int c = 0;
-      for (int i = 0; i < rows[r].length; i++) {
-        final ch = rows[r][i];
-        final digit = int.tryParse(ch);
-        if (digit != null) {
-          c += digit;
-        } else {
-          if (c < 8) {
-            grid[r][c] = ch;
-            c++;
-          }
-        }
-      }
+  /// Directly queries the piece on algebraic square [sq] (e.g. "e4") from the chess state.
+  /// Returns uppercase ('P','N','B','R','Q','K') for White, lowercase ('p','n','b','r','q','k') for Black.
+  /// 100% resilient across White and Black orientations, flips, and custom FENs.
+  String? _getPieceAt(String sq) {
+    try {
+      final p = _chess.get(sq);
+      if (p == null) return null;
+      final typeStr = p.type.name.toLowerCase();
+      return p.color == chess_logic.Color.WHITE ? typeStr.toUpperCase() : typeStr.toLowerCase();
+    } catch (_) {
+      return null;
     }
-    return grid;
   }
 
   /// Converts board (row, col) into algebraic square e.g. "e4"
@@ -259,11 +249,13 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
 
     if (_selectedSquare != null) {
+      // 1. If clicking a valid legal destination, execute move immediately
       if (_legalDestinations.contains(sq)) {
         _executeMove(_selectedSquare!, sq);
         return;
       }
 
+      // 2. If tapping the same square, deselect
       if (_selectedSquare == sq) {
         setState(() {
           _selectedSquare = null;
@@ -271,8 +263,29 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
         });
         return;
       }
+
+      // 3. If tapping another friendly piece of the active side, smoothly switch selection
+      if (pieceChar != null) {
+        final isWhitePiece = pieceChar == pieceChar.toUpperCase();
+        if ((isWhiteTurn && isWhitePiece) || (!isWhiteTurn && !isWhitePiece) || !widget.isPlayVsAi) {
+          HapticFeedback.selectionClick();
+          setState(() {
+            _selectedSquare = sq;
+            _legalDestinations = _getLegalMovesForSquare(sq);
+          });
+          return;
+        }
+      }
+
+      // 4. Otherwise clear selection
+      setState(() {
+        _selectedSquare = null;
+        _legalDestinations = [];
+      });
+      return;
     }
 
+    // No piece currently selected: select if piece belongs to side to move
     if (pieceChar != null) {
       final isWhitePiece = pieceChar == pieceChar.toUpperCase();
       if ((isWhiteTurn && isWhitePiece) || (!isWhiteTurn && !isWhitePiece) || !widget.isPlayVsAi) {
@@ -297,7 +310,6 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
 
   @override
   Widget build(BuildContext context) {
-    final grid = _parseFenGrid(widget.fen);
     final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
     final inCheck = _chess.in_check;
 
@@ -307,8 +319,9 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
       final targetKing = isWhiteTurn ? 'K' : 'k';
       for (int r = 0; r < 8; r++) {
         for (int c = 0; c < 8; c++) {
-          if (grid[r][c] == targetKing) {
-            checkKingSquare = _coordsToSquare(r, c);
+          final s = _coordsToSquare(r, c);
+          if (_getPieceAt(s) == targetKing) {
+            checkKingSquare = s;
             break;
           }
         }
@@ -501,33 +514,35 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                 final isLegal = _legalDestinations.contains(sq);
                                 final isCheckKing = sq == checkKingSquare;
 
-                                // Get piece directly from parsed FEN grid
-                                final pieceChar = grid[r][c];
+                                // Get piece directly from chess state for this square
+                                final pieceChar = _getPieceAt(sq);
                                 final bgColor = isLight ? const Color(0xFFF0D9B5) : const Color(0xFFB58863);
 
                                 return Expanded(
                                   child: DragTarget<String>(
-                                    onWillAccept: (fromSq) => fromSq != null && fromSq != sq,
+                                    onWillAccept: (fromSq) => fromSq != null && fromSq != sq && _legalDestinations.contains(sq),
                                     onAccept: (fromSq) {
                                       _executeMove(fromSq, sq);
                                     },
                                     builder: (ctx, candidateData, rejectedData) {
                                       final isTrail = sq == _lastFrom || sq == _lastTo;
+                                      final isHovered = candidateData.isNotEmpty && _legalDestinations.contains(sq);
 
                                       Color tileColor;
                                       if (isCheckKing) {
                                         tileColor = const Color(0xFFE53935).withOpacity(0.72);
                                       } else if (isSelected) {
                                         tileColor = const Color(0xFFBBCB44);
-                                      } else if (candidateData.isNotEmpty) {
+                                      } else if (isHovered) {
                                         tileColor = const Color(0xFF769656);
                                       } else if (isTrail) {
-                                        tileColor = const Color(0xFFCED56A);
+                                        tileColor = const Color(0xFFCED56A).withOpacity(0.8);
                                       } else {
                                         tileColor = bgColor;
                                       }
 
                                       return GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
                                         onTap: () => _onSquareTap(sq, pieceChar),
                                         child: SizedBox.expand(
                                           child: Container(
@@ -576,10 +591,10 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                                     child: Container(
                                                       width: pieceChar == null
                                                           ? squareSize * 0.28
-                                                          : squareSize * 0.76,
+                                                          : squareSize * 0.82,
                                                       height: pieceChar == null
                                                           ? squareSize * 0.28
-                                                          : squareSize * 0.76,
+                                                          : squareSize * 0.82,
                                                       decoration: BoxDecoration(
                                                         shape: BoxShape.circle,
                                                         color: pieceChar == null
@@ -587,15 +602,15 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                                             : Colors.transparent,
                                                         border: pieceChar != null
                                                             ? Border.all(
-                                                                color: Colors.black.withOpacity(0.35),
-                                                                width: math.max(3.0, squareSize * 0.08),
+                                                                color: Colors.black.withOpacity(0.40),
+                                                                width: math.max(3.2, squareSize * 0.085),
                                                               )
                                                             : null,
                                                       ),
                                                     ),
                                                   ),
 
-                                                // Dynamic Staunton Vector Piece (Draggable with centered anchor)
+                                                // Dynamic Staunton Vector Piece (Dual Tap & Drag)
                                                 if (pieceChar != null)
                                                   Center(
                                                     child: Draggable<String>(
@@ -627,13 +642,17 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
                                                           size: pieceSize,
                                                         ),
                                                       ),
-                                                      child: AnimatedScale(
-                                                        scale: isSelected ? 1.12 : 1.0,
-                                                        duration: const Duration(milliseconds: 130),
-                                                        curve: Curves.easeOutBack,
-                                                        child: ChessPieceWidget(
-                                                          pieceChar: pieceChar,
-                                                          size: pieceSize,
+                                                      child: GestureDetector(
+                                                        behavior: HitTestBehavior.opaque,
+                                                        onTap: () => _onSquareTap(sq, pieceChar),
+                                                        child: AnimatedScale(
+                                                          scale: isSelected ? 1.12 : 1.0,
+                                                          duration: const Duration(milliseconds: 130),
+                                                          curve: Curves.easeOutBack,
+                                                          child: ChessPieceWidget(
+                                                            pieceChar: pieceChar,
+                                                            size: pieceSize,
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
