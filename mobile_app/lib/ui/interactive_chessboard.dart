@@ -3,18 +3,25 @@ import 'package:flutter/material.dart';
 import 'package:chess/chess.dart' as chess_logic;
 import 'chess_piece_widget.dart';
 
-/// Interactive 8x8 Chessboard supporting Drag & Drop, Tap to Move,
-/// legal move dots, check indicator, takeback, board flip, and AI best-move arrow.
+class _BoardCoord {
+  final int row;
+  final int col;
+  const _BoardCoord(this.row, this.col);
+}
+
+/// Interactive 8x8 Chessboard Widget with Live Move Handling, Turn Indicators,
+/// AI Move Auto-Reply support, Drag-and-Drop, and Best Move Arrows.
+/// Fully responsive across Mobile Portrait and Landscape Tablet/LDPlayer screens.
 class InteractiveChessboard extends StatefulWidget {
   final String fen;
-  final String? bestMove; // UCI e.g. "e2e4"
+  final String? bestMove; // e.g. "e2e4"
   final bool isWhiteOrientation;
   final bool isPlayVsAi;
   final bool isAiThinking;
-  final Function(String from, String to, String newFen) onMoveMade;
-  final VoidCallback? onResetBoard;
-  final VoidCallback? onUndoMove;
-  final VoidCallback? onFlipBoard;
+  final Function(String newFen, String moveUci) onMoveMade;
+  final VoidCallback onResetBoard;
+  final VoidCallback onUndoMove;
+  final VoidCallback onFlipBoard;
   final Function(bool playVsAi)? onToggleMode;
 
   const InteractiveChessboard({
@@ -25,9 +32,9 @@ class InteractiveChessboard extends StatefulWidget {
     this.isPlayVsAi = true,
     this.isAiThinking = false,
     required this.onMoveMade,
-    this.onResetBoard,
-    this.onUndoMove,
-    this.onFlipBoard,
+    required this.onResetBoard,
+    required this.onUndoMove,
+    required this.onFlipBoard,
     this.onToggleMode,
   }) : super(key: key);
 
@@ -35,18 +42,12 @@ class InteractiveChessboard extends StatefulWidget {
   State<InteractiveChessboard> createState() => _InteractiveChessboardState();
 }
 
-class _BoardCoord {
-  final int row;
-  final int col;
-  const _BoardCoord(this.row, this.col);
-}
-
 class _InteractiveChessboardState extends State<InteractiveChessboard> {
+  late chess_logic.Chess _chess;
   String? _selectedSquare;
   List<String> _legalDestinations = [];
   String? _lastFrom;
   String? _lastTo;
-  late chess_logic.Chess _chess;
 
   @override
   void initState() {
@@ -103,16 +104,6 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     return '$file$rank';
   }
 
-  /// Converts algebraic square e.g. "e4" to (row, col)
-  _BoardCoord _squareToCoords(String sq) {
-    if (sq.length < 2) return const _BoardCoord(0, 0);
-    final file = sq[0].toLowerCase().codeUnitAt(0) - 'a'.codeUnitAt(0);
-    final rank = int.tryParse(sq[1]) ?? 1;
-    final row = widget.isWhiteOrientation ? 8 - rank : rank - 1;
-    final col = widget.isWhiteOrientation ? file : 7 - file;
-    return _BoardCoord(row, col);
-  }
-
   /// Finds all legal destination squares for a piece on [fromSquare]
   List<String> _getLegalMovesForSquare(String fromSquare) {
     try {
@@ -148,84 +139,61 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
           _selectedSquare = null;
           _legalDestinations = [];
         });
-        widget.onMoveMade(from, to, newFen);
-        return;
-      }
-    } catch (_) {}
 
-    // Fallback: If strict chess.dart move check failed in analysis mode, allow move directly
-    if (!widget.isPlayVsAi) {
-      _forceMoveInFen(from, to);
-    }
-  }
-
-  void _forceMoveInFen(String from, String to) {
-    // In free analysis mode, fallback move
-    final grid = _parseFenGrid(widget.fen);
-    final pFrom = _squareToCoords(from);
-    final pTo = _squareToCoords(to);
-    final piece = grid[pFrom.row][pFrom.col];
-    if (piece != null) {
-      grid[pFrom.row][pFrom.col] = null;
-      grid[pTo.row][pTo.col] = piece;
-      // Rebuild FEN rows
-      final rowStrs = <String>[];
-      for (int r = 0; r < 8; r++) {
-        int empty = 0;
-        String rowStr = '';
-        for (int c = 0; c < 8; c++) {
-          if (grid[r][c] == null) {
-            empty++;
-          } else {
-            if (empty > 0) {
-              rowStr += empty.toString();
-              empty = 0;
-            }
-            rowStr += grid[r][c]!;
-          }
-        }
-        if (empty > 0) rowStr += empty.toString();
-        rowStrs.add(rowStr);
+        final uci = '$from$to';
+        widget.onMoveMade(newFen, uci);
+      } else {
+        setState(() {
+          _selectedSquare = null;
+          _legalDestinations = [];
+        });
       }
-      final turn = widget.fen.contains(' w ') ? 'b' : 'w';
-      final newFen = '${rowStrs.join('/')} $turn - - 0 1';
-      widget.onMoveMade(from, to, newFen);
+    } catch (_) {
+      setState(() {
+        _selectedSquare = null;
+        _legalDestinations = [];
+      });
     }
   }
 
   void _onSquareTap(String sq, String? pieceChar) {
     if (widget.isAiThinking) return;
 
-    if (_selectedSquare == null) {
-      if (pieceChar == null) return;
-      // In vs AI mode, only allow moving White if user is White
-      final isWhitePiece = pieceChar == pieceChar.toUpperCase();
-      final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
-      if (widget.isPlayVsAi && (isWhitePiece != isWhiteTurn)) {
+    final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
+
+    if (_selectedSquare != null) {
+      if (_legalDestinations.contains(sq)) {
+        _executeMove(_selectedSquare!, sq);
         return;
       }
 
-      setState(() {
-        _selectedSquare = sq;
-        _legalDestinations = _getLegalMovesForSquare(sq);
-      });
-    } else {
-      if (_legalDestinations.contains(sq) || (!widget.isPlayVsAi && _selectedSquare != sq)) {
-        _executeMove(_selectedSquare!, sq);
-      } else {
-        // Deselect or select another piece of current turn
-        if (pieceChar != null) {
-          setState(() {
-            _selectedSquare = sq;
-            _legalDestinations = _getLegalMovesForSquare(sq);
-          });
-        } else {
-          setState(() {
-            _selectedSquare = null;
-            _legalDestinations = [];
-          });
-        }
+      if (_selectedSquare == sq) {
+        setState(() {
+          _selectedSquare = null;
+          _legalDestinations = [];
+        });
+        return;
       }
+    }
+
+    if (pieceChar != null) {
+      final isWhitePiece = pieceChar == pieceChar.toUpperCase();
+      if ((isWhiteTurn && isWhitePiece) || (!isWhiteTurn && !isWhitePiece) || !widget.isPlayVsAi) {
+        setState(() {
+          _selectedSquare = sq;
+          _legalDestinations = _getLegalMovesForSquare(sq);
+        });
+      } else {
+        setState(() {
+          _selectedSquare = null;
+          _legalDestinations = [];
+        });
+      }
+    } else {
+      setState(() {
+        _selectedSquare = null;
+        _legalDestinations = [];
+      });
     }
   }
 
@@ -234,279 +202,327 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
     final grid = _parseFenGrid(widget.fen);
     final isWhiteTurn = _chess.turn == chess_logic.Color.WHITE;
 
-    return Column(
-      children: [
-        // 1. Status / Turn Bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white12),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isWhiteTurn ? Colors.white : Colors.grey[800],
-                      border: Border.all(color: Colors.white70, width: 1.5),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenHeight = MediaQuery.of(context).size.height;
+        final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+        // In landscape (LDPlayer), constrain board height so it never exceeds screen height.
+        // In portrait (Phones), board fills the available width (up to 540 max).
+        final maxAllowedHeight = isLandscape ? math.max(260.0, screenHeight - 160.0) : 540.0;
+        final boardSize = math.min(constraints.maxWidth, maxAllowedHeight);
+        final squareSize = boardSize / 8.0;
+        final pieceSize = squareSize * 0.82;
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // 1. Status / Turn Bar
+            SizedBox(
+              width: boardSize,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isWhiteTurn ? Colors.white : Colors.grey[800],
+                            border: Border.all(color: Colors.white70, width: 1.5),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.isAiThinking
+                              ? '🤖 Engine is thinking...'
+                              : (isWhiteTurn ? 'White to Move' : 'Black to Move'),
+                          style: TextStyle(
+                            color: widget.isAiThinking ? Colors.amber : Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    widget.isAiThinking
-                        ? '🤖 Engine is thinking...'
-                        : (isWhiteTurn ? 'White to Move' : 'Black to Move'),
-                    style: TextStyle(
-                      color: widget.isAiThinking ? Colors.amber : Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              // Play vs AI Toggle
-              GestureDetector(
-                onTap: () {
-                  if (widget.onToggleMode != null) {
-                    widget.onToggleMode!(!widget.isPlayVsAi);
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: widget.isPlayVsAi ? Colors.amber.withOpacity(0.2) : Colors.blueAccent.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent, width: 1),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        widget.isPlayVsAi ? Icons.smart_toy : Icons.people,
-                        size: 14,
-                        color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        widget.isPlayVsAi ? 'Vs Engine' : 'Analysis',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                    // Play vs AI Toggle
+                    GestureDetector(
+                      onTap: () {
+                        if (widget.onToggleMode != null) {
+                          widget.onToggleMode!(!widget.isPlayVsAi);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: widget.isPlayVsAi
+                              ? Colors.amber.withOpacity(0.2)
+                              : Colors.blueAccent.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              widget.isPlayVsAi ? Icons.smart_toy : Icons.people,
+                              size: 14,
+                              color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              widget.isPlayVsAi ? 'Vs Engine' : 'Analysis',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: widget.isPlayVsAi ? Colors.amber : Colors.blueAccent,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            // 2. The 8x8 Board (Perfect square, zero black horizontal gaps)
+            SizedBox(
+              width: boardSize,
+              height: boardSize,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.6),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Stack(
+                    children: [
+                      Column(
+                        children: List.generate(8, (r) {
+                          return Expanded(
+                            child: Row(
+                              // CRITICAL: stretch prevents vertical collapse of squares!
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: List.generate(8, (c) {
+                                final sq = _coordsToSquare(r, c);
+                                final isLight = (r + c) % 2 == 0;
+                                final isSelected = sq == _selectedSquare;
+                                final isLegal = _legalDestinations.contains(sq);
+
+                                // Get piece directly from parsed FEN grid
+                                final pieceChar = grid[r][c];
+                                final bgColor = isLight ? const Color(0xFFF0D9B5) : const Color(0xFFB58863);
+
+                                return Expanded(
+                                  child: DragTarget<String>(
+                                    onWillAccept: (fromSq) => fromSq != null && fromSq != sq,
+                                    onAccept: (fromSq) {
+                                      _executeMove(fromSq, sq);
+                                    },
+                                    builder: (ctx, candidateData, rejectedData) {
+                                      final isTrail = sq == _lastFrom || sq == _lastTo;
+                                      final tileColor = isSelected
+                                          ? const Color(0xFFBBCB44)
+                                          : (candidateData.isNotEmpty
+                                              ? const Color(0xFF769656)
+                                              : (isTrail ? const Color(0xFFCED56A) : bgColor));
+
+                                      return GestureDetector(
+                                        onTap: () => _onSquareTap(sq, pieceChar),
+                                        child: SizedBox.expand(
+                                          child: Container(
+                                            color: tileColor,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              alignment: Alignment.center,
+                                              children: [
+                                                // Coordinate Rank indicator on left edge (file a)
+                                                if (c == 0)
+                                                  Positioned(
+                                                    top: 2,
+                                                    left: 3,
+                                                    child: Text(
+                                                      sq[1],
+                                                      style: TextStyle(
+                                                        fontSize: math.max(9.0, squareSize * 0.18),
+                                                        fontWeight: FontWeight.bold,
+                                                        color: isLight
+                                                            ? const Color(0xFFB58863)
+                                                            : const Color(0xFFF0D9B5),
+                                                      ),
+                                                    ),
+                                                  ),
+
+                                                // Coordinate File indicator on bottom edge (rank 1)
+                                                if (r == 7)
+                                                  Positioned(
+                                                    bottom: 2,
+                                                    right: 3,
+                                                    child: Text(
+                                                      sq[0],
+                                                      style: TextStyle(
+                                                        fontSize: math.max(9.0, squareSize * 0.18),
+                                                        fontWeight: FontWeight.bold,
+                                                        color: isLight
+                                                            ? const Color(0xFFB58863)
+                                                            : const Color(0xFFF0D9B5),
+                                                      ),
+                                                    ),
+                                                  ),
+
+                                                // Legal Destination Marker (Dot for empty, Ring for capture)
+                                                if (isLegal)
+                                                  Center(
+                                                    child: Container(
+                                                      width: pieceChar == null
+                                                          ? squareSize * 0.28
+                                                          : squareSize * 0.76,
+                                                      height: pieceChar == null
+                                                          ? squareSize * 0.28
+                                                          : squareSize * 0.76,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        color: pieceChar == null
+                                                            ? Colors.black.withOpacity(0.28)
+                                                            : Colors.transparent,
+                                                        border: pieceChar != null
+                                                            ? Border.all(
+                                                                color: Colors.black.withOpacity(0.35),
+                                                                width: math.max(3.0, squareSize * 0.08),
+                                                              )
+                                                            : null,
+                                                      ),
+                                                    ),
+                                                  ),
+
+                                                // Dynamic Staunton Vector Piece (Draggable with centered anchor)
+                                                if (pieceChar != null)
+                                                  Center(
+                                                    child: Draggable<String>(
+                                                      data: sq,
+                                                      dragAnchorStrategy: (draggable, context, position) {
+                                                        final liftSize = pieceSize * 1.15;
+                                                        return Offset(liftSize / 2.0, liftSize / 2.0);
+                                                      },
+                                                      onDragStarted: () {
+                                                        setState(() {
+                                                          _selectedSquare = sq;
+                                                          _legalDestinations = _getLegalMovesForSquare(sq);
+                                                        });
+                                                      },
+                                                      feedback: Material(
+                                                        color: Colors.transparent,
+                                                        child: ChessPieceWidget(
+                                                          pieceChar: pieceChar,
+                                                          size: pieceSize * 1.15,
+                                                          isDragging: true,
+                                                        ),
+                                                      ),
+                                                      childWhenDragging: Opacity(
+                                                        opacity: 0.25,
+                                                        child: ChessPieceWidget(
+                                                          pieceChar: pieceChar,
+                                                          size: pieceSize,
+                                                        ),
+                                                      ),
+                                                      child: AnimatedScale(
+                                                        scale: isSelected ? 1.12 : 1.0,
+                                                        duration: const Duration(milliseconds: 130),
+                                                        curve: Curves.easeOutBack,
+                                                        child: ChessPieceWidget(
+                                                          pieceChar: pieceChar,
+                                                          size: pieceSize,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                );
+                              }),
+                            ),
+                          );
+                        }),
+                      ),
+
+                      // Best Move Arrow Layer (e.g. e2e4)
+                      if (widget.bestMove != null && widget.bestMove!.length >= 4)
+                        IgnorePointer(
+                          child: CustomPaint(
+                            size: Size(boardSize, boardSize),
+                            painter: ArrowPainter(
+                              bestMove: widget.bestMove!,
+                              isWhite: widget.isWhiteOrientation,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        // 2. The 8x8 Board
-        AspectRatio(
-          aspectRatio: 1.0,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.6),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Stack(
+            const SizedBox(height: 8),
+
+            // 3. Quick Board Actions Bar (Flip, Undo, Reset)
+            SizedBox(
+              width: boardSize,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  Column(
-                    children: List.generate(8, (r) {
-                      return Expanded(
-                        child: Row(
-                          children: List.generate(8, (c) {
-                            final sq = _coordsToSquare(r, c);
-                            final isLight = (r + c) % 2 == 0;
-                            final isSelected = sq == _selectedSquare;
-                            final isLegal = _legalDestinations.contains(sq);
-
-                            // Get piece from parsed grid directly
-                            final pieceChar = grid[r][c];
-
-                            final isWhitePiece = pieceChar != null && pieceChar == pieceChar.toUpperCase();
-                            final bgColor = isLight ? const Color(0xFFF0D9B5) : const Color(0xFFB58863);
-
-                            return Expanded(
-                              child: DragTarget<String>(
-                                onWillAccept: (fromSq) => fromSq != null && fromSq != sq,
-                                onAccept: (fromSq) {
-                                  _executeMove(fromSq, sq);
-                                },
-                                builder: (ctx, candidateData, rejectedData) {
-                                    final isTrail = sq == _lastFrom || sq == _lastTo;
-                                    final tileColor = isSelected
-                                        ? const Color(0xFFBBCB44)
-                                        : (candidateData.isNotEmpty
-                                            ? const Color(0xFF769656)
-                                            : (isTrail ? const Color(0xFFCED56A) : bgColor));
-
-                                    return GestureDetector(
-                                      onTap: () => _onSquareTap(sq, pieceChar),
-                                      child: Container(
-                                        color: tileColor,
-                                        child: Stack(
-                                          alignment: Alignment.center,
-                                          children: [
-                                            // Coordinate Rank/File indicators on edges
-                                            if (c == 0)
-                                              Positioned(
-                                                top: 2,
-                                                left: 2,
-                                                child: Text(
-                                                  sq[1],
-                                                  style: TextStyle(
-                                                    fontSize: 9,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
-                                                  ),
-                                                ),
-                                              ),
-                                            if (r == 7)
-                                              Positioned(
-                                                bottom: 2,
-                                                right: 2,
-                                                child: Text(
-                                                  sq[0],
-                                                  style: TextStyle(
-                                                    fontSize: 9,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: isLight ? const Color(0xFFB58863) : const Color(0xFFF0D9B5),
-                                                  ),
-                                                ),
-                                              ),
-
-                                            // Legal Destination Dot
-                                            if (isLegal)
-                                              Container(
-                                                width: pieceChar == null ? 14 : 32,
-                                                height: pieceChar == null ? 14 : 32,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: pieceChar == null
-                                                      ? Colors.black.withOpacity(0.28)
-                                                      : Colors.transparent,
-                                                  border: pieceChar != null
-                                                      ? Border.all(color: Colors.black.withOpacity(0.35), width: 4)
-                                                      : null,
-                                                ),
-                                              ),
-
-                                            // Piece Widget (Draggable) with touch scale animation
-                                            if (pieceChar != null)
-                                              Draggable<String>(
-                                                data: sq,
-                                                dragAnchorStrategy: pointerDragAnchorStrategy,
-                                                onDragStarted: () {
-                                                  setState(() {
-                                                    _selectedSquare = sq;
-                                                    _legalDestinations = _getLegalMovesForSquare(sq);
-                                                  });
-                                                },
-                                                feedback: Material(
-                                                  color: Colors.transparent,
-                                                  child: Transform.translate(
-                                                    offset: const Offset(-26, -26),
-                                                    child: ChessPieceWidget(
-                                                      pieceChar: pieceChar,
-                                                      size: 52,
-                                                      isDragging: true,
-                                                    ),
-                                                  ),
-                                                ),
-                                                childWhenDragging: Opacity(
-                                                  opacity: 0.20,
-                                                  child: ChessPieceWidget(
-                                                    pieceChar: pieceChar,
-                                                    size: 38,
-                                                  ),
-                                                ),
-                                                child: AnimatedScale(
-                                                  scale: isSelected ? 1.14 : 1.0,
-                                                  duration: const Duration(milliseconds: 140),
-                                                  curve: Curves.easeOutBack,
-                                                  child: ChessPieceWidget(
-                                                    pieceChar: pieceChar,
-                                                    size: 38,
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              );
-                            }),
-                          ),
-                        );
-                      }),
-                    ),
-
-                  // Best Move Arrow Layer (e.g. e2e4)
-                  if (widget.bestMove != null && widget.bestMove!.length >= 4)
-                    IgnorePointer(
-                      child: CustomPaint(
-                        size: Size.infinite,
-                        painter: ArrowPainter(
-                          bestMove: widget.bestMove!,
-                          isWhite: widget.isWhiteOrientation,
-                        ),
-                      ),
-                    ),
+                  TextButton.icon(
+                    onPressed: widget.onFlipBoard,
+                    icon: const Icon(Icons.swap_vert, size: 18, color: Colors.white70),
+                    label: const Text('Flip', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  ),
+                  TextButton.icon(
+                    onPressed: widget.onUndoMove,
+                    icon: const Icon(Icons.undo, size: 18, color: Colors.white70),
+                    label: const Text('Takeback', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  ),
+                  TextButton.icon(
+                    onPressed: widget.onResetBoard,
+                    icon: const Icon(Icons.refresh, size: 18, color: Colors.amber),
+                    label: const Text('New Game', style: TextStyle(color: Colors.amber, fontSize: 12)),
+                  ),
                 ],
               ),
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
-
-        // 3. Quick Board Actions Bar (Flip, Undo, Reset)
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            TextButton.icon(
-              onPressed: widget.onFlipBoard,
-              icon: const Icon(Icons.swap_vert, size: 18, color: Colors.white70),
-              label: const Text('Flip', style: TextStyle(color: Colors.white70, fontSize: 12)),
-            ),
-            TextButton.icon(
-              onPressed: widget.onUndoMove,
-              icon: const Icon(Icons.undo, size: 18, color: Colors.white70),
-              label: const Text('Takeback', style: TextStyle(color: Colors.white70, fontSize: 12)),
-            ),
-            TextButton.icon(
-              onPressed: widget.onResetBoard,
-              icon: const Icon(Icons.refresh, size: 18, color: Colors.amber),
-              label: const Text('New Game', style: TextStyle(color: Colors.amber, fontSize: 12)),
-            ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 }
 
-/// Custom painter that draws a clean animated vector arrow for the AI's best move.
+/// Custom painter that draws a clean vector arrow for the AI's best move.
 class ArrowPainter extends CustomPainter {
   final String bestMove; // e.g. "e2e4"
   final bool isWhite;
@@ -524,42 +540,49 @@ class ArrowPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (bestMove.length < 4) return;
-    final sqSize = size.width / 8;
+    final sqSize = size.width / 8.0;
+
     final fromSq = bestMove.substring(0, 2);
     final toSq = bestMove.substring(2, 4);
 
     final start = _squareToCenter(fromSq, sqSize);
     final end = _squareToCenter(toSq, sqSize);
 
-    final paint = Paint()
-      ..color = const Color(0xC822C55E) // Semi-transparent bright emerald green
-      ..strokeWidth = 6.0
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+    final linePaint = Paint()
+      ..color = const Color(0xFF43A047).withOpacity(0.82)
+      ..strokeWidth = math.max(4.0, sqSize * 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
 
-    // Draw line shaft
-    canvas.drawLine(start, end, paint);
+    final headPaint = Paint()
+      ..color = const Color(0xFF43A047).withOpacity(0.92)
+      ..style = PaintingStyle.fill;
 
-    // Draw arrowhead
-    final angle = (end - start).direction;
-    const arrowSize = 16.0;
+    // Shorten end point so arrowhead looks sharp
+    final angle = math.atan2(end.dy - start.dy, end.dx - start.dx);
+    final headLength = math.max(12.0, sqSize * 0.32);
+    final adjustedEnd = Offset(
+      end.dx - (headLength * 0.5) * math.cos(angle),
+      end.dy - (headLength * 0.5) * math.sin(angle),
+    );
+
+    // Draw main arrow body shaft
+    canvas.drawLine(start, adjustedEnd, linePaint);
+
+    // Draw clean triangle arrowhead
     final path = Path();
     path.moveTo(end.dx, end.dy);
     path.lineTo(
-      end.dx - arrowSize * math.cos(angle - math.pi / 6),
-      end.dy - arrowSize * math.sin(angle - math.pi / 6),
+      end.dx - headLength * math.cos(angle - math.pi / 6),
+      end.dy - headLength * math.sin(angle - math.pi / 6),
     );
     path.lineTo(
-      end.dx - arrowSize * math.cos(angle + math.pi / 6),
-      end.dy - arrowSize * math.sin(angle + math.pi / 6),
+      end.dx - headLength * math.cos(angle + math.pi / 6),
+      end.dy - headLength * math.sin(angle + math.pi / 6),
     );
     path.close();
 
-    final fillPaint = Paint()
-      ..color = const Color(0xC822C55E)
-      ..style = PaintingStyle.fill;
-
-    canvas.drawPath(path, fillPaint);
+    canvas.drawPath(path, headPaint);
   }
 
   @override

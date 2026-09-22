@@ -4,6 +4,7 @@ import 'package:chess/chess.dart' as chess_logic;
 
 import 'models/engine_config.dart';
 import 'models/engine_profile.dart';
+import 'services/ad_service.dart';
 import 'services/chess_engine_service.dart';
 import 'services/retention_service.dart';
 import 'services/telemetry_service.dart';
@@ -14,8 +15,10 @@ import 'ui/engine_selector_sheet.dart';
 import 'ui/eval_bar.dart';
 import 'ui/interactive_chessboard.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Safely initialize AdMob monetization (with graceful fallback for emulators)
+  await AdService.instance.initialize();
   runApp(const ChessScannerApp());
 }
 
@@ -76,6 +79,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Check if user has an active 30-minute Pro Pass from rewarded ad
+    if (AdService.instance.hasActiveProPass) {
+      _isPremium = true;
+    }
     _checkDeviceSentinel();
     _calculateEngineEvaluation(_currentFen);
   }
@@ -109,7 +116,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     });
   }
 
-  void _onMoveMade(String from, String to, String newFen) {
+  void _onMoveMade(String newFen, String moveUci) {
     _fenHistory.add(_currentFen);
     _moveCount++;
 
@@ -119,31 +126,39 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     _calculateEngineEvaluation(newFen);
 
-    // AI Auto-Response in "Play vs AI" mode
-    if (_isPlayVsAi && newFen.contains(' b ')) {
-      setState(() => _isAiThinking = true);
-
-      Timer(const Duration(milliseconds: 550), () {
-        if (!mounted) return;
-        _makeAiMove(newFen);
-      });
+    // If Play vs AI is enabled, execute the engine's counter-move automatically
+    if (_isPlayVsAi) {
+      _triggerAiCounterMove(newFen);
     }
   }
 
-  Future<void> _makeAiMove(String currentFen) async {
+  Future<void> _triggerAiCounterMove(String fenAfterPlayerMove) async {
+    setState(() => _isAiThinking = true);
+
     try {
+      final chess = chess_logic.Chess.fromFEN(fenAfterPlayerMove);
+      if (chess.game_over) {
+        setState(() => _isAiThinking = false);
+        return;
+      }
+
+      await Future.delayed(const Duration(milliseconds: 550));
+
       final result = await _engineService.analyzePosition(
-        currentFen,
+        fenAfterPlayerMove,
         engineId: _currentEngine.id,
         maxDepth: _currentEngine.defaultDepth,
       );
 
-      if (result.bestMove.length >= 4) {
-        final from = result.bestMove.substring(0, 2);
-        final to = result.bestMove.substring(2, 4);
+      final aiMoveUci = result.bestMove;
+      if (aiMoveUci.length >= 4) {
+        final from = aiMoveUci.substring(0, 2);
+        final to = aiMoveUci.substring(2, 4);
+        final promo = aiMoveUci.length >= 5 ? aiMoveUci[4] : 'q';
 
-        final chess = chess_logic.Chess.fromFEN(currentFen);
-        if (chess.move({'from': from, 'to': to, 'promotion': 'q'})) {
+        final moved = chess.move({'from': from, 'to': to, 'promotion': promo});
+        if (moved) {
+          if (!mounted) return;
           setState(() {
             _fenHistory.add(_currentFen);
             _currentFen = chess.fen;
@@ -157,7 +172,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       }
     } catch (_) {}
 
-    setState(() => _isAiThinking = false);
+    if (mounted) setState(() => _isAiThinking = false);
   }
 
   void _undoMove() {
@@ -185,6 +200,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       _evalPercent = 50.0;
       _scoreText = "0.00";
     });
+
+    // Occasionally show interstitial ad on game reset if not premium
+    AdService.instance.showInterstitialAd();
+
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Board reset to standard starting position.')),
     );
@@ -229,7 +248,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => EngineSelectorSheet(
         currentEngine: _currentEngine,
-        isPremium: _isPremium,
+        isPremium: _isPremium || AdService.instance.hasActiveProPass,
         onEngineSelected: (newEngine) {
           setState(() {
             _currentEngine = newEngine;
@@ -243,18 +262,26 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           );
         },
         onOpenPaywall: _openPaywallSheet,
-        onWatchAdForTempUnlock: () {
-          setState(() {
-            _isPremium = true; // Temporary 30m unlock
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Colors.amber,
-              content: Text('🎬 Rewarded Ad Watched! Pro Engines unlocked for 30 minutes!'),
-            ),
-          );
-        },
+        onWatchAdForTempUnlock: _watchAdForProPass,
       ),
+    );
+  }
+
+  void _watchAdForProPass() {
+    AdService.instance.showRewardedAd(
+      context: context,
+      onRewardEarned: () {
+        if (!mounted) return;
+        setState(() {
+          _isPremium = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.amber,
+            content: Text('🎬 Reward Earned! 30-Minute Pro Pass activated.'),
+          ),
+        );
+      },
     );
   }
 
@@ -262,39 +289,38 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF181818),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.workspace_premium, color: Colors.amber, size: 26),
-                SizedBox(width: 8),
-                Text('Upgrade to Chess Scanner Pro', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text(
+                  '👑 Unlock All 4 Engines',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.amber),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white54),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             const Text(
-              'Unlock all 3 superhuman engines (Stockfish 19 NNUE 3500 ELO, Blitz, and Lichess Cloud) plus unlimited camera scans.',
-              textAlign: TextAlign.center,
+              'Gain unlimited access to Stockfish 19 NNUE (3500+ ELO), Stockfish Blitz, and Lichess Cloud Engine.',
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             const SizedBox(height: 16),
 
-            // Regional Pricing Cards
+            // Pricing Plans
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -344,11 +370,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               icon: const Icon(Icons.play_circle_fill, color: Colors.orangeAccent),
               label: const Text('Or Watch a Video Ad for 30m Pro Pass', style: TextStyle(color: Colors.orangeAccent)),
               onPressed: () {
-                setState(() => _isPremium = true);
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(backgroundColor: Colors.amber, content: Text('🎬 Ad Completed! Pro Pass active for 30 min.')),
-                );
+                _watchAdForProPass();
               },
             ),
           ],
@@ -390,92 +413,241 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  Widget _buildEngineSelectorCard() {
+    final hasPass = AdService.instance.hasActiveProPass;
+    final remaining = AdService.instance.remainingProPassTime;
+
+    return InkWell(
+      onTap: _openEngineSelector,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.amber.withOpacity(0.35)),
+        ),
+        child: Row(
+          children: [
+            Text(_currentEngine.icon, style: const TextStyle(fontSize: 20)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        _currentEngine.name,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: _currentEngine.isPro ? Colors.purple.withOpacity(0.3) : Colors.green.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          hasPass && _currentEngine.isPro
+                              ? 'PRO ($remaining)'
+                              : (_currentEngine.isPro ? 'PRO' : 'BASE FREE'),
+                          style: TextStyle(
+                            color: _currentEngine.isPro ? Colors.purpleAccent : Colors.greenAccent,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '${_currentEngine.elo} ELO  •  Depth ${_currentEngine.defaultDepth}',
+                    style: const TextStyle(fontSize: 11, color: Colors.white54),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down, color: Colors.amber),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCoachAdviceCard(String coachAdvice) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.only(top: 8),
+      decoration: BoxDecoration(
+        color: Colors.blueAccent.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+      ),
+      child: Text(
+        coachAdvice,
+        style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
+      ),
+    );
+  }
+
+  Widget _buildBestMoveCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF333333)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('BEST MOVE (AI)', style: TextStyle(color: Colors.white54, fontSize: 11)),
+              Text(
+                _bestMove.toUpperCase(),
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.greenAccent),
+              ),
+            ],
+          ),
+          ElevatedButton.icon(
+            onPressed: _openEngineSelector,
+            icon: const Icon(Icons.tune, size: 16),
+            label: const Text('Change Engine'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF333333),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCameraScanCard() {
+    return Card(
+      color: const Color(0xFF1E1E1E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(14.0),
+        child: Column(
+          children: [
+            const Icon(Icons.camera_alt, size: 32, color: Colors.amber),
+            const SizedBox(height: 6),
+            const Text(
+              'Scan Physical Chess Board',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 2),
+            const Text(
+              'Point camera at physical boards, screens, or test sample diagrams.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _openCameraScanner,
+              icon: const Icon(Icons.photo_camera, size: 16),
+              label: const Text('Open Camera Scanner'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildScannerTab() {
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
     final coachAdvice = _coachAdvice;
 
+    // RESPONSIVE LAYOUT:
+    // In Landscape (e.g. LDPlayer 16:9), split into 2 columns:
+    // Left Column: The 8x8 Chessboard (fits screen height with NO vertical scrolling)
+    // Right Column: Stockfish Evaluation Bar, Engine Selector, Coach Advice, Best Move Card & Actions
+    if (isLandscape) {
+      return Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Left: Perfectly Sized Interactive Chessboard
+            Expanded(
+              flex: 5,
+              child: Center(
+                child: InteractiveChessboard(
+                  fen: _currentFen,
+                  bestMove: _bestMove,
+                  isWhiteOrientation: _isWhiteOrientation,
+                  isPlayVsAi: _isPlayVsAi,
+                  isAiThinking: _isAiThinking,
+                  onMoveMade: _onMoveMade,
+                  onResetBoard: _resetBoard,
+                  onUndoMove: _undoMove,
+                  onFlipBoard: _flipBoard,
+                  onToggleMode: (playVsAi) {
+                    setState(() => _isPlayVsAi = playVsAi);
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+
+            // Right: Scrollable Control & Analysis Sidebar
+            Expanded(
+              flex: 4,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ChessEvalBar(evalPercent: _evalPercent, scoreText: _scoreText),
+                    const SizedBox(height: 10),
+                    _buildEngineSelectorCard(),
+                    if (_currentEngine.id == 'coach') _buildCoachAdviceCard(coachAdvice),
+                    const SizedBox(height: 10),
+                    _buildBestMoveCard(),
+                    const SizedBox(height: 10),
+                    _buildCameraScanCard(),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: _openCalibrationSheet,
+                      icon: const Icon(Icons.tune, color: Colors.amber, size: 16),
+                      label: const Text('Calibrate Ambiguous Squares', style: TextStyle(color: Colors.white, fontSize: 11)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.amber),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
+                    ),
+                    if (!_isPremium) const SizedBox(height: 10),
+                    if (!_isPremium) const AdBannerWidget(),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Standard Portrait Layout (Phones)
     return SingleChildScrollView(
       padding: const EdgeInsets.all(14.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 1. Animated Evaluation Bar
           ChessEvalBar(evalPercent: _evalPercent, scoreText: _scoreText),
           const SizedBox(height: 10),
-
-          // 2. Active Engine Selector Card
-          InkWell(
-            onTap: _openEngineSelector,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1E1E),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.amber.withOpacity(0.35)),
-              ),
-              child: Row(
-                children: [
-                  Text(_currentEngine.icon, style: const TextStyle(fontSize: 20)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              _currentEngine.name,
-                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: _currentEngine.isPro ? Colors.purple.withOpacity(0.3) : Colors.green.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                _currentEngine.isPro ? 'PRO' : 'BASE FREE',
-                                style: TextStyle(
-                                  color: _currentEngine.isPro ? Colors.purpleAccent : Colors.greenAccent,
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          '${_currentEngine.elo} ELO  •  Depth ${_currentEngine.defaultDepth}',
-                          style: const TextStyle(fontSize: 11, color: Colors.white54),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.arrow_drop_down, color: Colors.amber),
-                ],
-              ),
-            ),
-          ),
+          _buildEngineSelectorCard(),
+          if (_currentEngine.id == 'coach') _buildCoachAdviceCard(coachAdvice),
           const SizedBox(height: 10),
 
-          // 3. Coach Tactical Advice Card (shown for Base Coach Engine)
-          if (_currentEngine.id == 'coach')
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.blueAccent.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
-              ),
-              child: Text(
-                coachAdvice,
-                style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
-              ),
-            ),
-
-          // 4. Interactive 8x8 Chessboard with Piece Movement & Best Move Arrow
+          // 8x8 Chessboard
           InteractiveChessboard(
             fen: _currentFen,
             bestMove: _bestMove,
@@ -492,79 +664,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 5. Engine Best Move & Boost Bar
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF333333)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('BEST MOVE (AI)', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                    Text(
-                      _bestMove.toUpperCase(),
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.greenAccent),
-                    ),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: _openEngineSelector,
-                  icon: const Icon(Icons.tune, size: 16),
-                  label: const Text('Change Engine'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF333333),
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // 6. Camera Scan CTA (Opens real CameraScannerScreen)
-          Card(
-            color: const Color(0xFF1E1E1E),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  const Icon(Icons.camera_alt, size: 38, color: Colors.amber),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Scan Physical Chess Board',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Point camera at physical boards, books, screens, or test sample diagrams.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: _openCameraScanner,
-                    icon: const Icon(Icons.photo_camera),
-                    label: const Text('Open Camera Scanner'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildBestMoveCard(),
+          const SizedBox(height: 10),
+          _buildCameraScanCard(),
           const SizedBox(height: 10),
 
-          // 7. Quick Calibration Sheet Trigger
           OutlinedButton.icon(
             onPressed: _openCalibrationSheet,
             icon: const Icon(Icons.tune, color: Colors.amber, size: 18),
@@ -574,6 +678,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               padding: const EdgeInsets.symmetric(vertical: 8),
             ),
           ),
+          if (!_isPremium) const SizedBox(height: 14),
+          if (!_isPremium) const Center(child: AdBannerWidget()),
         ],
       ),
     );
@@ -634,6 +740,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final hasPass = AdService.instance.hasActiveProPass;
+    final remaining = AdService.instance.remainingProPassTime;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('♟️ Chess Scanner Pro'),
@@ -650,8 +759,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 10.0),
               child: Center(
                 child: Chip(
-                  label: Text(_isPremium ? '💎 PRO' : '⭐ FREE', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                  backgroundColor: _isPremium ? Colors.teal : Colors.amber[900],
+                  label: Text(
+                    hasPass
+                        ? '⏱️ PRO ($remaining)'
+                        : (_isPremium ? '💎 PRO' : '⭐ FREE'),
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                  backgroundColor: _isPremium || hasPass ? Colors.teal : Colors.amber[900],
                 ),
               ),
             ),
