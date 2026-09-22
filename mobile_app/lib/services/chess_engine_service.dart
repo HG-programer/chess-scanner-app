@@ -61,11 +61,12 @@ class _SearchMessage {
   final String fen;
   final String engineId;
   final int maxDepth;
-  const _SearchMessage(this.fen, this.engineId, this.maxDepth);
+  final List<String> fenHistory;
+  const _SearchMessage(this.fen, this.engineId, this.maxDepth, [this.fenHistory = const []]);
 }
 
 EngineAnalysisResult _runBackgroundSearch(_SearchMessage msg) {
-  return ChessEngineService.searchPositionCore(msg.fen, msg.engineId, msg.maxDepth);
+  return ChessEngineService.searchPositionCore(msg.fen, msg.engineId, msg.maxDepth, msg.fenHistory);
 }
 
 /// Robust Chess Engine Service featuring:
@@ -650,12 +651,21 @@ class ChessEngineService {
     return null;
   }
 
+  static String _normalizeFen(String fen) {
+    final parts = fen.split(' ');
+    if (parts.length >= 4) {
+      return '${parts[0]} ${parts[1]} ${parts[2]} ${parts[3]}';
+    }
+    return fen;
+  }
+
   /// Synchronous search core executed inside the dedicated background Isolate
   static EngineAnalysisResult searchPositionCore(
     String fen,
     String engineId,
-    int maxDepth,
-  ) {
+    int maxDepth, [
+    List<String> fenHistory = const [],
+  ]) {
     try {
       final chess = chess_logic.Chess.fromFEN(fen);
       if (chess.in_checkmate) {
@@ -760,7 +770,37 @@ class ChessEngineService {
 
           if (chess.move({'from': from, 'to': to, 'promotion': prom})) {
             try {
-              final eval = _alphaBeta(chess, currentDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz, isMaster, state);
+              int eval = _alphaBeta(chess, currentDepth - 1, -999999, 999999, !isWhiteTurn, isBlitz, isMaster, state);
+
+              // Repetition & Anti-Draw Defense:
+              if (fenHistory.isNotEmpty) {
+                final targetNorm = _normalizeFen(chess.fen);
+                int repCount = 0;
+                for (final pastFen in fenHistory) {
+                  if (_normalizeFen(pastFen) == targetNorm) {
+                    repCount++;
+                  }
+                }
+
+                // If this move causes a 3rd repetition (repCount >= 2 since it was seen 2 times previously):
+                if (repCount >= 2) {
+                  // A 3-fold repetition is a DRAW (eval = 0 cp).
+                  // If the engine is playing for a win, penalize drawing heavily so it seeks alternatives!
+                  if (isWhiteTurn) {
+                    eval = -150;
+                  } else {
+                    eval = 150;
+                  }
+                } else if (repCount == 1 && (isMaster || isBlitz)) {
+                  // 2nd repetition: anti-shuffling penalty to keep the game sharp and progressive
+                  if (isWhiteTurn) {
+                    eval -= 35;
+                  } else {
+                    eval += 35;
+                  }
+                }
+              }
+
               levelScoredMoves.add(_ScoredMove(m, eval));
             } finally {
               chess.undo();
@@ -870,7 +910,7 @@ class ChessEngineService {
 
   /// Background search runner function for Isolate compute
   static EngineAnalysisResult _runBackgroundSearch(_SearchMessage message) {
-    return searchPositionCore(message.fen, message.engineId, message.maxDepth);
+    return searchPositionCore(message.fen, message.engineId, message.maxDepth, message.fenHistory);
   }
 
   /// Evaluates the position and calculates the next best move.
@@ -880,6 +920,7 @@ class ChessEngineService {
     String fen, {
     String engineId = 'coach',
     int maxDepth = 4,
+    List<String> fenHistory = const [],
   }) async {
     // 1. If engine is Lichess Cloud, query Lichess Cloud API first
     if (engineId == 'cloud') {
@@ -893,11 +934,11 @@ class ChessEngineService {
     try {
       return await compute(
         _runBackgroundSearch,
-        _SearchMessage(fen, engineId, maxDepth),
+        _SearchMessage(fen, engineId, maxDepth, fenHistory),
       );
     } catch (_) {
       // Graceful fallback to direct execution
-      return searchPositionCore(fen, engineId, maxDepth);
+      return searchPositionCore(fen, engineId, maxDepth, fenHistory);
     }
   }
 

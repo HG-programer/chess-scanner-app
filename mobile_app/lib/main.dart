@@ -137,6 +137,128 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     });
   }
 
+  String _normalizeFen(String fen) {
+    final parts = fen.split(' ');
+    if (parts.length >= 4) {
+      return '${parts[0]} ${parts[1]} ${parts[2]} ${parts[3]}';
+    }
+    return fen;
+  }
+
+  int _countRepetitions(String currentFen) {
+    final target = _normalizeFen(currentFen);
+    int count = 1;
+    for (final pastFen in _fenHistory) {
+      if (_normalizeFen(pastFen) == target) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  bool _checkAndHandleGameOver(chess_logic.Chess chess, String currentFen) {
+    if (chess.in_checkmate) {
+      final winner = chess.turn == chess_logic.Color.WHITE ? 'Black' : 'White';
+      _showGameOverDialog(
+        title: '🏆 Checkmate!',
+        message: '$winner wins the game by checkmate.',
+        icon: Icons.emoji_events,
+        iconColor: Colors.amber,
+      );
+      return true;
+    }
+
+    if (chess.in_stalemate) {
+      _showGameOverDialog(
+        title: '½-½ Draw by Stalemate',
+        message: 'No legal moves available and the king is not in check.',
+        icon: Icons.handshake,
+        iconColor: Colors.cyanAccent,
+      );
+      return true;
+    }
+
+    if (_countRepetitions(currentFen) >= 3 || chess.in_threefold_repetition) {
+      _showGameOverDialog(
+        title: '½-½ Draw by Threefold Repetition',
+        message: 'The exact same board position has occurred 3 times. FIDE rules declare the game drawn.',
+        icon: Icons.repeat,
+        iconColor: Colors.cyanAccent,
+      );
+      return true;
+    }
+
+    if (chess.insufficient_material) {
+      _showGameOverDialog(
+        title: '½-½ Draw by Insufficient Material',
+        message: 'Neither player has sufficient pieces to force checkmate.',
+        icon: Icons.handshake,
+        iconColor: Colors.cyanAccent,
+      );
+      return true;
+    }
+
+    if (chess.half_moves >= 100) {
+      _showGameOverDialog(
+        title: '½-½ Draw by 50-Move Rule',
+        message: '50 consecutive full moves completed without any pawn push or capture.',
+        icon: Icons.hourglass_bottom,
+        iconColor: Colors.cyanAccent,
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  void _showGameOverDialog({
+    required String title,
+    required String message,
+    required IconData icon,
+    required Color iconColor,
+  }) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Review Board', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.refresh, color: Colors.black),
+            label: const Text('New Game', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _startNewMatch(playAsWhite: _isWhiteOrientation);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Evaluates the position and calculates the next best move with Alpha-Beta & Cloud Engine
   Future<void> _calculateEngineEvaluation(String fen) async {
     try {
@@ -144,6 +266,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         fen,
         engineId: _currentEngine.id,
         maxDepth: _currentEngine.defaultDepth,
+        fenHistory: _fenHistory,
       );
 
       if (!mounted) return;
@@ -169,6 +292,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       _currentFen = newFen;
     });
 
+    final chess = chess_logic.Chess.fromFEN(newFen);
+    final isGameOver = _checkAndHandleGameOver(chess, newFen);
+    if (isGameOver) {
+      if (mounted) setState(() => _isAiThinking = false);
+      return;
+    }
+
     // If Play vs AI is enabled, the bot will compute and play its counter-move.
     // Avoid running duplicate concurrent evaluations that contend for CPU on the same thread.
     if (_isPlayVsAi) {
@@ -183,7 +313,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     try {
       final chess = chess_logic.Chess.fromFEN(fenAfterPlayerMove);
-      if (chess.game_over) {
+      if (chess.game_over || _countRepetitions(fenAfterPlayerMove) >= 3) {
         if (mounted) setState(() => _isAiThinking = false);
         return;
       }
@@ -201,6 +331,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         fenAfterPlayerMove,
         engineId: _currentEngine.id,
         maxDepth: _currentEngine.defaultDepth,
+        fenHistory: _fenHistory,
       );
 
       final aiMoveUci = result.bestMove;
@@ -237,9 +368,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
       if (moved) {
         if (!mounted) return;
+        final updatedFen = chess.fen;
         setState(() {
           _fenHistory.add(_currentFen);
-          _currentFen = chess.fen;
+          _currentFen = updatedFen;
           _isAiThinking = false;
           _moveCount++;
           if (executedAiMoveUci != null) {
@@ -253,6 +385,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           _engineSearchDepth = result.depth;
         });
 
+        // Check if bot's move resulted in Game Over / Draw
+        _checkAndHandleGameOver(chess, updatedFen);
         return;
       }
     } catch (e) {
