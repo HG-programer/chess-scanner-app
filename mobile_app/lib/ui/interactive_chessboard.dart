@@ -18,10 +18,10 @@ class InteractiveChessboard extends StatefulWidget {
   final bool isWhiteOrientation;
   final bool isPlayVsAi;
   final bool isAiThinking;
-  final Function(String newFen, String moveUci) onMoveMade;
-  final VoidCallback onResetBoard;
-  final VoidCallback onUndoMove;
-  final VoidCallback onFlipBoard;
+  final void Function(String from, String to, String newFen) onMoveMade;
+  final VoidCallback? onResetBoard;
+  final VoidCallback? onUndoMove;
+  final VoidCallback? onFlipBoard;
   final Function(bool playVsAi)? onToggleMode;
 
   const InteractiveChessboard({
@@ -32,9 +32,9 @@ class InteractiveChessboard extends StatefulWidget {
     this.isPlayVsAi = true,
     this.isAiThinking = false,
     required this.onMoveMade,
-    required this.onResetBoard,
-    required this.onUndoMove,
-    required this.onFlipBoard,
+    this.onResetBoard,
+    this.onUndoMove,
+    this.onFlipBoard,
     this.onToggleMode,
   }) : super(key: key);
 
@@ -140,8 +140,7 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
           _legalDestinations = [];
         });
 
-        final uci = '$from$to';
-        widget.onMoveMade(newFen, uci);
+        widget.onMoveMade(from, to, newFen);
       } else {
         setState(() {
           _selectedSquare = null;
@@ -492,29 +491,35 @@ class _InteractiveChessboardState extends State<InteractiveChessboard> {
             const SizedBox(height: 8),
 
             // 3. Quick Board Actions Bar (Flip, Undo, Reset)
-            SizedBox(
-              width: boardSize,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  TextButton.icon(
-                    onPressed: widget.onFlipBoard,
-                    icon: const Icon(Icons.swap_vert, size: 18, color: Colors.white70),
-                    label: const Text('Flip', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  ),
-                  TextButton.icon(
-                    onPressed: widget.onUndoMove,
-                    icon: const Icon(Icons.undo, size: 18, color: Colors.white70),
-                    label: const Text('Takeback', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  ),
-                  TextButton.icon(
-                    onPressed: widget.onResetBoard,
-                    icon: const Icon(Icons.refresh, size: 18, color: Colors.amber),
-                    label: const Text('New Game', style: TextStyle(color: Colors.amber, fontSize: 12)),
-                  ),
-                ],
+            if (widget.onFlipBoard != null || widget.onUndoMove != null || widget.onResetBoard != null) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: boardSize,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    if (widget.onFlipBoard != null)
+                      TextButton.icon(
+                        onPressed: widget.onFlipBoard,
+                        icon: const Icon(Icons.swap_vert, size: 18, color: Colors.white70),
+                        label: const Text('Flip', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      ),
+                    if (widget.onUndoMove != null)
+                      TextButton.icon(
+                        onPressed: widget.onUndoMove,
+                        icon: const Icon(Icons.undo, size: 18, color: Colors.white70),
+                        label: const Text('Takeback', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      ),
+                    if (widget.onResetBoard != null)
+                      TextButton.icon(
+                        onPressed: widget.onResetBoard,
+                        icon: const Icon(Icons.refresh, size: 18, color: Colors.amber),
+                        label: const Text('New Game', style: TextStyle(color: Colors.amber, fontSize: 12)),
+                      ),
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
         );
       },

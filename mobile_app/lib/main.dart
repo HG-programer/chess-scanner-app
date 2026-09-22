@@ -116,7 +116,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     });
   }
 
-  void _onMoveMade(String newFen, String moveUci) {
+  void _onMoveMade(String from, String to, String newFen) {
     _fenHistory.add(_currentFen);
     _moveCount++;
 
