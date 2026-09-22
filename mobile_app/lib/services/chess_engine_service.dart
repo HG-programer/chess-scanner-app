@@ -569,7 +569,7 @@ class ChessEngineService {
 
           String advice;
           if (engineId == 'stockfish19') {
-            advice = "🏆 Stockfish 19 NNUE: Book move $bookSan — Grandmaster opening line with optimal win-rate.";
+            advice = "🏆 Stockfish NNUE: Book move $bookSan — Grandmaster opening line with optimal win-rate.";
           } else if (engineId == 'blitz') {
             advice = "⚡ Stockfish Blitz: Book move $bookSan! Rapid development accelerating king-side attack.";
           } else if (engineId == 'cloud') {
@@ -716,14 +716,14 @@ class ChessEngineService {
     final toSq = moveObj['to']?.toString() ?? '';
     final piece = moveObj['piece']?.toString() ?? '';
 
-    // Stockfish 19 NNUE: Superhuman grandmaster calculation telemetry
+    // Stockfish NNUE: Superhuman grandmaster calculation telemetry
     if (engineId == 'stockfish19') {
       final advantageText = scorePawns >= 1.5
           ? 'Decisive advantage (+${scorePawns.toStringAsFixed(2)})'
           : (scorePawns <= -1.5
               ? 'Black counter-play (${scorePawns.toStringAsFixed(2)})'
               : 'Positional balance (${scorePawns >= 0 ? '+' : ''}${scorePawns.toStringAsFixed(2)})');
-      return "🏆 Stockfish 19 NNUE [Depth ${depth + 3}+Q | $advantageText]: Best move $san. Highly structured piece coordination.";
+      return "🏆 Stockfish NNUE [Depth ${depth + 3}+Q | $advantageText]: Best move $san. Highly structured piece coordination.";
     }
 
     // Stockfish Blitz: Fast aggressive attack commentary

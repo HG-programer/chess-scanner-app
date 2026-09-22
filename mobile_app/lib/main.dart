@@ -495,7 +495,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Gain unlimited access to Stockfish 19 NNUE (3500+ ELO), Stockfish Blitz, and Lichess Cloud Engine.',
+              'Gain unlimited access to Stockfish NNUE Grandmaster (3500+ ELO), Stockfish Blitz, and Lichess Cloud Engine.',
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -587,6 +587,158 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  void _openLegalSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1E1E24),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('📜 Legal, Privacy & Licenses', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                tileColor: const Color(0xFF262730),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                leading: const Icon(Icons.shield_outlined, color: Colors.cyanAccent),
+                title: const Text('Privacy Policy & Data Safety', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                subtitle: const Text('On-device camera processing, zero audio recording', style: TextStyle(fontSize: 11, color: Colors.white70)),
+                trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showPrivacyDialog();
+                },
+              ),
+              const SizedBox(height: 10),
+              ListTile(
+                tileColor: const Color(0xFF262730),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                leading: const Icon(Icons.gavel, color: Colors.amberAccent),
+                title: const Text('Stockfish GPLv3 & Open Source Licenses', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                subtitle: const Text('Full GPLv3 source code link, Lichess & Chessground notices', style: TextStyle(fontSize: 11, color: Colors.white70)),
+                trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showLicensesDialog();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPrivacyDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E24),
+        title: const Row(
+          children: [
+            Icon(Icons.shield_outlined, color: Colors.cyanAccent, size: 22),
+            SizedBox(width: 8),
+            Text('Privacy Policy & Data Safety', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'ChessSnap: AI Board Scanner',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber, fontSize: 13),
+              ),
+              SizedBox(height: 8),
+              Text(
+                '• On-Device Camera Processing: Live camera frames are analyzed in real-time in device memory to detect chessboards and pieces. No video or photos are saved or uploaded to external servers.\n\n'
+                '• No Audio Recording: Microphone access (RECORD_AUDIO) is disabled and completely removed.\n\n'
+                '• No Storage Permissions: The app does not access personal photos, media, or files.\n\n'
+                '• Advertising & In-App Purchases: Google Mobile Ads (with UMP consent for GDPR/CCPA) and Google Play Billing Library 9.\n\n'
+                '• Open Source: We respect all third-party and open-source licenses.',
+                style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: Colors.amber)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLicensesDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E24),
+        title: const Row(
+          children: [
+            Icon(Icons.gavel, color: Colors.amberAccent, size: 22),
+            SizedBox(width: 8),
+            Text('Open Source & Legal Notices', style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Stockfish Chess Engine (GPLv3)',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Stockfish is free software released under the GNU General Public License v3.0 (GPLv3).\n'
+                'Authors: Tord Romstad, Marco Costalba, Joona Kiiski, Gary Linscott, and the Stockfish community.\n'
+                'Official Source Code: https://github.com/official-stockfish/Stockfish\n\n'
+                'ChessSnap includes evaluation heuristics and opening theory derived from and inspired by Stockfish. In accordance with GPLv3, complete corresponding source references are provided.',
+                style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.4),
+              ),
+              Divider(color: Colors.white24, height: 20),
+              Text(
+                'Lichess & Chessground (MIT / CC0)',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
+              ),
+              SizedBox(height: 4),
+              Text(
+                'Chessboard visualization based on Chessground by Niklas Fiekas and Lichess. Cloud evaluation queries the Lichess Open API under public domain guidelines.',
+                style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.4),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Understood', style: TextStyle(color: Colors.amber)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEngineSelectorCard() {
     final hasPass = AdService.instance.hasActiveProPass;
     final remaining = AdService.instance.remainingProPassTime;
@@ -660,7 +812,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         borderColor = Colors.amber.withOpacity(0.4);
         bgColor = Colors.amber.withOpacity(0.12);
         textColor = Colors.amberAccent;
-        engineTitle = '🏆 Stockfish 19 NNUE Telemetry';
+        engineTitle = '🏆 Stockfish NNUE Telemetry';
         break;
       case 'blitz':
         borderColor = Colors.orangeAccent.withOpacity(0.4);
@@ -1031,6 +1183,35 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               subtitle: Text(_isLiteMode ? 'Throttled to save power & cool device' : 'Full multi-threaded Stockfish analysis'),
             ),
           ),
+          const SizedBox(height: 16),
+
+          const Text('📜 Legal & Open Source Compliance', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text('Privacy policy, data safety, and open-source licensing', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 12),
+
+          Card(
+            color: const Color(0xFF1E1E1E),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.shield_outlined, color: Colors.cyanAccent),
+                  title: const Text('Privacy Policy & Data Safety', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('On-device camera processing, zero audio, Billing 9'),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                  onTap: _showPrivacyDialog,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.gavel, color: Colors.amberAccent),
+                  title: const Text('Stockfish GPLv3 & Open Source Licenses', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Stockfish GPLv3 source code pointer & third-party notices'),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+                  onTap: _showLicensesDialog,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1069,10 +1250,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             tooltip: 'Scan Board',
             onPressed: _openCameraScanner,
           ),
+          IconButton(
+            icon: const Icon(Icons.shield_outlined, color: Colors.cyanAccent),
+            tooltip: 'Privacy & Licenses',
+            onPressed: _openLegalSheet,
+          ),
           GestureDetector(
             onTap: _openPaywallSheet,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10.0),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
               child: Center(
                 child: Chip(
                   label: Text(

@@ -39,10 +39,10 @@ class EngineProfile {
 
   static const EngineProfile stockfish19 = EngineProfile(
     id: 'stockfish19',
-    name: 'Stockfish 19 NNUE',
+    name: 'Stockfish NNUE Grandmaster',
     tag: 'PRO ONLY',
     elo: 3500,
-    description: 'Superhuman NNUE neural engine. Unbeatable depth 20+ multi-pv tournament analysis.',
+    description: 'Superhuman NNUE neural heuristics. Unbeatable depth 20+ multi-pv tournament analysis.',
     tier: EngineTier.pro,
     defaultDepth: 22,
     icon: '🏆',
